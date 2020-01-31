@@ -654,17 +654,17 @@ exportAviaNZ(dets5a, "c7_20181224_134004.wav")
 # read in median clipping and Harma results
 det = data.frame()
 for (wavfile in wavfiles){
-  det1 = read.table(paste0("~/Documents/gitrep/paper2/results-seg/", wavfile, ".segsh"), header=F)
+  det1 = read.table(paste0("~/Documents/gitrep/changepoint-detection/results-seg/", wavfile, ".segsh"), header=F)
   det1 = mutate(det1, start=gsub("[\\[,]", "", V1), end=gsub(",", "", V2),
                 thr=gsub(",", "", V3), par2=gsub("\\]", "", V4), file=wavfile)
   det1 = det1[,-c(1:4)]
   
-  det2 = read.table(paste0("~/Documents/gitrep/paper2/results-seg/", wavfile, ".segsm"), header=F)
+  det2 = read.table(paste0("~/Documents/gitrep/changepoint-detection/results-seg/", wavfile, ".segsm"), header=F)
   det2 = mutate(det2, start=gsub("[\\[,]", "", V1), end=gsub(",", "", V2),
                 thr=gsub(",", "", V3), par2=gsub("\\]", "", V4), file=wavfile)
   det2 = det2[,-c(1:4)]
 
-  det3 = read.table(paste0("~/Documents/gitrep/paper2/results-seg/", wavfile, ".segslm"), header=F)
+  det3 = read.table(paste0("~/Documents/gitrep/changepoint-detection/results-seg/", wavfile, ".segslm"), header=F)
   det3 = mutate(det3, start=gsub("[\\[,]", "", V1), end=gsub(",", "", V2),
                 thr=gsub(",", "", V3), par2=gsub("\\]", "", V4), file=wavfile)
   det3 = det3[,-c(1:4)]
@@ -778,27 +778,41 @@ detectchp <- function(ts, MAXLOOKBACK, PEN, THETA0){
   segs = vector(mode="list", length=length(ts))
   segs[[1]] = matrix(0, nrow=1, ncol=3)
   segs[[2]] = matrix(0, nrow=1, ncol=3)
+  possiblestarts = c(2)
   
   for(t in 3:length(ts)){
     # get cost if this is from background:
     bgcost = bestcost[t-1] + cost0(ts[t], THETA0)
     
     # get costs if this is from segment of length k:
-    # (seg length >= 2)
-    # (maxlookback limited if t short)
-    segcost = rep(Inf, min(MAXLOOKBACK, t-2))
-    for(k in seq_along(segcost)){
-      segcost[k] = bestcost[t-k-1] + cost1(ts[(t-k):t])
+    # (possiblestarts will be limited by min seg length and lookback)
+    segcost = rep(Inf, length(possiblestarts))
+    ki = 1
+    for(k in possiblestarts){
+      segcost[ki] = bestcost[k-1] + cost1(ts[k:t])
+      ki = ki + 1
     }
     
-    # first x of the proposed segment:
-    bestsegstart = which.min(segcost)  # in k = negative coord relative to t
-    bestsegcost = segcost[bestsegstart] + PEN
-    bestsegstart = t - bestsegstart  # in absolute position
+    # determine the best split with a segment:
+    # (first x of the proposed segment)
+    bestsegcost = min(segcost) + PEN
+    bestsegstart = possiblestarts[which.min(segcost)]  # in absolute position
     # print(sprintf("Best segment was %d-%d: %.1f = %.1f + F(t-k-1)",
-    # bestsegstart, t, segcost[t-bestsegstart], cost1(ts[bestsegstart:t])))
+    #               bestsegstart, t, min(segcost)-PEN, cost1(ts[bestsegstart:t])))
     
-    # is background better than seg?f
+    # pruning:
+    # remove points where F(k) + Ck:m >= F(m)
+    possiblestarts = possiblestarts[segcost < bestsegcost]
+    # print(sprintf("Kept %d segments out of %d", length(possiblestarts), length(segcost)))
+    # add one more timepoint (segment length >= 2, so at t+1 we check t)
+    possiblestarts = c(possiblestarts, t)
+    
+    # this line is sufficient for limiting lookback:
+    if(possiblestarts[1] < t + 2 - MAXLOOKBACK){
+      possiblestarts = possiblestarts[-1]
+    }
+    
+    # is background better than seg?
     if(bgcost < bestsegcost){
       bestcost[t] = bgcost
       # no new changepoints
@@ -960,3 +974,5 @@ detoverl = detoverl[!duplicated(detoverl),]
 
 group_by(detoverl, method) %>%
   summarize(n=n())
+
+
