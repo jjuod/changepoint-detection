@@ -57,6 +57,8 @@ importAviaNZ <- function(infile){
   a = unnest(a, species)
   a = filter(a, !species %in% 1:5)
   
+  a$start = as.numeric(a$start)
+  a$end = as.numeric(a$end)
   a$filename = infile
   return(a)
 }
@@ -953,6 +955,8 @@ bind_rows(detnew, detgood) %>%
 
 
 # number of segments produced by each method ("to review")
+det$start = as.numeric(det$start)
+det$end = as.numeric(det$end)
 filter(det, method=="harma" & par2==0.7 & thr==10 | 
          method=="med" & par2==60 & thr=="4.0" |
          method=="medlog" & par2==70 & thr==1.3) %>%
@@ -961,8 +965,6 @@ filter(det, method=="harma" & par2==0.7 & thr==10 |
   summarize(n(), sum(end-start))
 
 # number of segments that would remain after review
-det$start = as.numeric(det$start)
-det$end = as.numeric(det$end)
 detoverl = filter(det, method=="harma" & par2==0.7 & thr==10 | 
          method=="med" & par2==60 & thr=="4.0" |
          method=="medlog" & par2==70 & thr==1.3) %>%
@@ -974,5 +976,5 @@ detoverl = detoverl[!duplicated(detoverl),]
 
 group_by(detoverl, method) %>%
   summarize(n=n())
-
+nrow(tieke)
 

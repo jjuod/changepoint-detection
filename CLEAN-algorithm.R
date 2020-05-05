@@ -1,0 +1,89 @@
+## Changepoint detection, OUR ALGORITHM (unknown theta0)
+## for change in mean of normal
+
+# cost of points from Gaussian w/ given mean, sd
+cost0 <- function(xs, theta0, sd){
+  liks = dnorm(xs, theta0, sd)
+  -2 * sum(log(liks))
+}
+# cost of points from Gaussian w/ free mean, sd
+cost1 <- function(xs, sd){
+  liks = dnorm(xs, mean(xs), sd)
+  -2 * sum(log(liks))
+}
+
+# estimate theta0 (and putative segments)
+# for a time series, using our SGD-style alg.
+shortsgd <- function(ts, MAXLOOKBACK, PEN, SD){
+  # Initialize:
+  # sequence of estimates {w_t}
+  wt = rep(ts[1], length(ts))
+  # bestcost[t] := F(all x[1:t])
+  bestcost = c(0)
+  
+  # Output:
+  # for each t, a matrix of segment starts-ends up to t
+  segs = vector(mode="list", length=length(ts))
+  segs[[1]] = matrix(0, nrow=1, ncol=3)
+  
+  # Main loop:
+  for(t in 2:length(ts)){
+    # Cost if t came from background:
+    bgcost = bestcost[t-1] + cost0(ts[t], wt[t-1], SD)
+    
+    # Cost if t came from segment:
+    # over all possible segments from t:t to t-MLB+1:k
+    # (seg length >= 1)
+    # (maxlookback limited if t short)
+    segcost = rep(Inf, min(MAXLOOKBACK, t-1))
+    for(k in t:max(t-MAXLOOKBACK+1, 2)){
+      segcost[t-k+1] = bestcost[k-1] + cost1(ts[k:t], SD)
+    }
+    
+    # First x of the proposed segment:
+    # (in lookback units, so start=1 -> ts[t-0:t],
+    # start=MLB -> ts[t-MLB+1:t])
+    bestsegstart = which.min(segcost)
+    bestsegcost = segcost[bestsegstart] + PEN
+    # (in absolute position = t)
+    bestsegstart = t-bestsegstart+1
+    # cat(sprintf("Best segment was %d-%d: Fsplit = %.1f + %.1f + P
+    #             vs F0 = %.1f + %.1f | theta0: %.2f\n",
+    #             bestsegstart, t, bestcost[bestsegstart-1], cost1(ts[bestsegstart:t]),
+    #             bestcost[t-1], cost0(ts[t], wt[t-1]), wt[t-1]))
+    
+    # Is background better than seg?
+    # Fill out bestcost, segs, wt for this t
+    if(bgcost < bestsegcost){
+      bestcost[t] = bgcost
+      # no new changepoints
+      segs[[t]] = segs[[t-1]]
+      # find current background set
+      bgpoints = 1:t
+      if(nrow(segs[[t]])>1){
+        segpoints = c()
+        for(s in 2:nrow(segs[[t]])){
+          segpoints = c(segpoints, (segs[[t]][s,1]) : (segs[[t]][s,2]))
+        }
+        bgpoints = bgpoints[-segpoints]
+      }
+      # update theta0
+      wt[t] = mean(ts[bgpoints])
+    } else {
+      bestcost[t] = bestsegcost
+      # add a segment
+      newseg = c(bestsegstart, t, mean(ts[bestsegstart:t]))
+      segs[[t]] = rbind(segs[[bestsegstart-1]], newseg)
+      wt[t] = wt[bestsegstart-1]
+    }
+  }
+  #cat(sprintf("Estimated theta0: %.2f\n", wt[t]))
+  
+  # one final iteration with the right theta0
+  #res = detectchp(ts, MAXLOOKBACK, PEN, wt[t])
+  #res
+  
+  # form output object
+  output = list(segs = segs[[length(segs)]][-1,], wt = wt)
+  return(output)
+}
