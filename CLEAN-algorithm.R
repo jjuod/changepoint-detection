@@ -20,6 +20,8 @@ shortsgd <- function(ts, MAXLOOKBACK, PEN, SD){
   wt = rep(ts[1], length(ts))
   # bestcost[t] := F(all x[1:t])
   bestcost = c(0)
+  # K: possible starts of segments to consider
+  possibleKs = c(1)
   
   # Output:
   # for each t, a matrix of segment starts-ends up to t
@@ -28,29 +30,30 @@ shortsgd <- function(ts, MAXLOOKBACK, PEN, SD){
   
   # Main loop:
   for(t in 2:length(ts)){
+    cat(sprintf("\nCycle %d\n", t))
     # Cost if t came from background:
     bgcost = bestcost[t-1] + cost0(ts[t], wt[t-1], SD)
     
     # Cost if t came from segment:
-    # over all possible segments from t:t to t-MLB+1:k
+    # over all possible segments from t:t to t-MLB+1:t
     # (seg length >= 1)
     # (maxlookback limited if t short)
-    segcost = rep(Inf, min(MAXLOOKBACK, t-1))
-    for(k in t:max(t-MAXLOOKBACK+1, 2)){
-      segcost[t-k+1] = bestcost[k-1] + cost1(ts[k:t], SD)
+    segcost = rep(Inf, length(possibleKs))
+    for(i in seq_along(possibleKs)){
+      # coord relative to t (1=at t):
+      t2 = possibleKs[i]
+      segcost[i] = bestcost[t2] + cost1(ts[(t2+1):t], SD)
     }
     
-    # First x of the proposed segment:
-    # (in lookback units, so start=1 -> ts[t-0:t],
-    # start=MLB -> ts[t-MLB+1:t])
+    # proposed segment cost:    
     bestsegstart = which.min(segcost)
     bestsegcost = segcost[bestsegstart] + PEN
-    # (in absolute position = t)
-    bestsegstart = t-bestsegstart+1
+    # First x of the proposed segment:
+    bestsegstart = possibleKs[bestsegstart]+1
     # cat(sprintf("Best segment was %d-%d: Fsplit = %.1f + %.1f + P
     #             vs F0 = %.1f + %.1f | theta0: %.2f\n",
-    #             bestsegstart, t, bestcost[bestsegstart-1], cost1(ts[bestsegstart:t]),
-    #             bestcost[t-1], cost0(ts[t], wt[t-1]), wt[t-1]))
+    #             bestsegstart, t, bestcost[bestsegstart-1], cost1(ts[bestsegstart:t], SD),
+    #             bestcost[t-1], cost0(ts[t], wt[t-1], SD), wt[t-1]))
     
     # Is background better than seg?
     # Fill out bestcost, segs, wt for this t
@@ -76,6 +79,26 @@ shortsgd <- function(ts, MAXLOOKBACK, PEN, SD){
       segs[[t]] = rbind(segs[[bestsegstart-1]], newseg)
       wt[t] = wt[bestsegstart-1]
     }
+    
+    # update and prune possible segment starts
+    toprune = rep(F, length(possibleKs))
+    # cat("\nsegcosts:\n")
+    # print(segcost)
+    for(i in seq_along(possibleKs)){
+      if(bestcost[t] <= segcost[i]){
+        toprune[i] = T
+      }
+    }
+    # remove one possible segment start to limit lookback:
+    if(t+1-possibleKs[1]>MAXLOOKBACK){
+      toprune[1] = T
+    }
+    # print(toprune)
+    possibleKs = possibleKs[!toprune]
+    possibleKs = c(possibleKs, t)
+    # cat(sprintf("After cycle %d, %d possible starts remain, from %d to %d",
+                # t, length(possibleKs), min(possibleKs), max(possibleKs)))
+    # print(possibleKs)
   }
   #cat(sprintf("Estimated theta0: %.2f\n", wt[t]))
   
