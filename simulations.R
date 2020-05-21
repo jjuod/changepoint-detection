@@ -21,7 +21,7 @@ run_scen1 = function(n){
   l2 = floor(n*0.2)
   l3 = floor(n*0.5)
   
-  lookback = floor(n*0.333)
+  lookback = floor(n*0.5)
   ts = c(rnorm(l1, 0, 1), rnorm(l2, 3, 1), rnorm(l3, 0, 1))
   pen = autoset_penalty(ts)
   res = shortsgd(ts, lookback, pen, 1)
@@ -41,7 +41,7 @@ run_scen2 = function(n){
   l6 = floor(n*0.1) # seg 0.7:0.8
   l7 = floor(n*0.2)
   
-  lookback = floor(n*0.333)
+  lookback = floor(n*0.5)
   ts = c(rnorm(l1, 0, 1), rnorm(l2, -1, 1),
          rnorm(l3, 0, 1), rnorm(l4, 1, 1),
          rnorm(l5, 0, 1), rnorm(l6, -1, 1),
@@ -60,7 +60,7 @@ run_scen3 = function(n){
   l2 = floor(n*0.4)
   l3 = floor(n*0.4)
   
-  lookback = floor(n*0.333)
+  lookback = floor(n*0.5)
   ts = c(rt(l1, 3)+0, rt(l2, 3)+2, rt(l3, 3)+0)
   pen = autoset_penalty(ts)
   res = shortsgd(ts, lookback, pen, sqrt(3))
@@ -73,8 +73,8 @@ run_scen3 = function(n){
 ## RUN THE SIMULATIONS:
 detsalln = data.frame()
 allsegs = matrix(0, ncol=7)
-ntotest = c(30, 60, 90, 130, 180, 240, 320, 440)
-niter = 300
+ntotest = c(30, 60, 90, 130, 180, 240, 320, 440, 550, 750)
+niter = 500
 
 # at each n:
 for(NPOINTS in ntotest){
@@ -83,6 +83,7 @@ for(NPOINTS in ntotest){
   dets2 = data.frame(n=NPOINTS, iter=1:niter, theta0=NA, scenario=2, fBG=0.7)
   dets3 = data.frame(n=NPOINTS, iter=1:niter, theta0=NA, scenario=3, fBG=0.6)
   for(i in 1:niter){
+    print(i)
     res = run_scen1(NPOINTS)
     dets1[i, "theta0"] = res$wt
     dets1[i, "median"] = res$med
@@ -119,115 +120,143 @@ colnames(allsegs)[6] = "run"
 colnames(allsegs)[7] = "scenario"
 
 # save output:
-write.table(detsalln, "~/Documents/gitrep/changepoint-detection/results-sim/sim1-estimates.tsv", quote=F, sep="\t", col.names=T, row.names=F)
-write.table(allsegs, "~/Documents/gitrep/changepoint-detection/results-sim/sim1-detections.tsv", quote=F, sep="\t", col.names=T, row.names=F)
+write.table(detsalln, "results-sim/sim1-estimates.tsv", quote=F, sep="\t", col.names=T, row.names=F)
+write.table(allsegs, "results-sim/sim1-detections.tsv", quote=F, sep="\t", col.names=T, row.names=F)
 
+detsalln = read.table("results-sim/sim1-estimates.tsv", h=T)
+allsegs = read.table("results-sim/sim1-detections.tsv", h=T)
 
 ## PLOT RESULTS
 ## 1. test if the final estimate theta0 converges (FIGURE 1)
 
 head(detsalln)
-# fraction of background points to get n_B at each NPOINTS
-detsalln$fBG = 0.8
-temp1 = group_by(detsalln, n) %>%
+temp1 = group_by(detsalln, n, scenario) %>%
   summarize(estimator="alg1", q2.5 = quantile(theta0, 0.025), q25=quantile(theta0, 0.25),
             q75=quantile(theta0, 0.75), q97.5=quantile(theta0, 0.975))
-temp2 = group_by(detsalln, n) %>%
+temp2 = group_by(detsalln, n, scenario) %>%
   summarize(estimator="median", q2.5 = quantile(median, 0.025), q25=quantile(median, 0.25),
             q75=quantile(median, 0.75), q97.5=quantile(median, 0.975))
-temp3 = data.frame(n=ntotest) %>%
-  mutate(estimator="mean", q2.5 = qnorm(0.025)/sqrt(fBG*n), q25=qnorm(0.25)/sqrt(fBG*n),
-            q75=qnorm(0.75)/sqrt(fBG*n), q97.5=qnorm(0.975)/sqrt(fBG*n))
+temp3 = expand.grid(n=ntotest, scenario=1:3) %>%
+  mutate(se = ifelse(scenario==3, sqrt(3), 1) / sqrt(fBG*n) ) %>%
+  mutate(estimator="mean", q2.5 = qnorm(0.025, sd=se), q25=qnorm(0.25, sd=se),
+            q75=qnorm(0.75, sd=se), q97.5=qnorm(0.975, sd=se))
 
-dets_sum = bind_rows(temp1, temp2, temp3) %>%
-  group_by(n, estimator)
+dets_sum = bind_rows(temp1, temp2, temp3)
 
 ungroup(dets_sum) %>%
-  mutate(n=ifelse(estimator=="median", n, ifelse(estimator=="mean", n+4, n+8))) %>%
+  filter(n<700) %>%
   ggplot() +
-  geom_segment(aes(x=n, xend=n, col=estimator, y=q2.5, yend=q97.5), alpha=0.3, size=3) +
-  geom_segment(aes(x=n, xend=n, col=estimator, y=q25, yend=q75), alpha=0.7, size=3) +
-  ylab("quantile value") + theme_minimal()
+  geom_linerange(aes(x=n, col=estimator, ymin=q2.5, ymax=q97.5), alpha=0.4, size=2, position=position_dodge(15)) +
+  geom_linerange(aes(x=n, col=estimator, ymin=q25, ymax=q75), alpha=0.8, size=2, position=position_dodge(15)) +
+  facet_grid(scenario~., scales = "free_y", labeller="label_both") + 
+  scale_x_continuous(breaks=ntotest, minor_breaks = NULL) +
+  ylab("quantile value") + theme_bw(base_size = 15) + theme(panel.grid.major.x = element_blank())
+ggsave("results-sim/fig1.png", width=23, height=12, units="cm", dpi=150)
 
 
 ## 2. test if changepoints are estimated consistently (TABLE 1)
 
 # add the number of segments detected in each iteration
-allsegs = group_by(allsegs, NPOINTS, i, run) %>%
+allsegs = group_by(allsegs, NPOINTS, run, scenario, i) %>%
   mutate(nsegs=n())
 
-# distribution of nsegs for each method x sample size
-distrnsegs = summarize(allsegs, nsegs=max(nsegs)) %>%
-  group_by(NPOINTS, run) %>%
-  summarize(freq1=sum(nsegs==1)/niter, freqMore=sum(nsegs>1)/niter) %>%
-  mutate(freqLess=1-freq1-freqMore)
+# extracts distances to true chps for TPR
+dist = function(pos1, pos2, scen, n){
+  n = n[1]
+  scen = scen[1]
+  if(scen==1){
+    truepos = floor(c(0.3*n+1, 0.5*n))
+  } else if(scen==2){
+    truepos = floor(c(0.2*n+1, 0.3*n, 0.5*n+1, 0.6*n, 0.7*n+1, 0.8*n))
+  } else if(scen==3){
+    truepos = floor(c(0.2*n+1, 0.6*n))
+  }
+  maxd = 0
+  # for each true chp:
+  for(chp in truepos){
+    # pick the closest estimated chp
+    d1 = min(abs(pos1-chp))/n
+    d2 = min(abs(pos2-chp))/n
+    d = min(d1, d2)
+    # get the worst-case (i.e. max over all truepos) d
+    maxd = max(maxd, d)
+  }
+  # max d<thr <=> there was a TP for each true chp within thr
+  return(maxd)
+}
 
-# see all segments raw
-ungroup(allsegs) %>%
-  mutate(xpos=NPOINTS+(run==2)*5+i*0.1, run=factor(run)) %>%
-  ggplot(aes(x=xpos, col=run)) +
-  geom_segment(aes(y=V1/NPOINTS, yend=V2/NPOINTS, xend=xpos), alpha=0.5) +
-  geom_hline(yintercept=c(0.3, 0.5), col="green") +
-  scale_color_manual(values=c("deepskyblue", "blue2")) +
-  theme_minimal() + xlab("length of time series") + ylab("pos along the series") 
+# summary of each iteration (dist for TPR and nsegs)
+segsperiter = summarize(allsegs, nsegs=max(nsegs),
+                       maxd=dist(V1, V2, scenario, NPOINTS))
+# fill in missing rows when an iteration returns 0 segs
+temp = expand.grid(NPOINTS=ntotest, run=1:2, scenario=1:3, i=1:500)
+temp$nsegs = 0
+temp$maxd = 1
+segsperiter = anti_join(temp, segsperiter, by=c("NPOINTS", "run", "scenario", "i")) %>% 
+  bind_rows(segsperiter, .)
 
-# show only the positions when 1 segment is reported
-filter(allsegs, nsegs==1) %>%
+# overall summary for each method
+distrnsegs = group_by(segsperiter, NPOINTS, scenario, run) %>%
+  mutate(ntrue = ifelse(scenario==2, 3, 1)) %>%
+  summarize(meannseg = mean(nsegs), ncorr=sum(nsegs==ntrue)/max(i),
+            tpr = mean(maxd<0.05), meand = mean(maxd), ntrue=max(ntrue)) %>%
+  ungroup
+
+# mean number of segs reported for each n x scenario x run
+distrnsegs %>%
+  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meannseg, lty=factor(run))) +
+  geom_hline(aes(yintercept=ntrue), col="green") +
+  facet_wrap(~scenario) + theme_bw()
+# fraction of simulations reporting the right nubmer of segs
+# distrnsegs %>%
+#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=ncorr, lty=factor(run))) +
+#   facet_wrap(~scenario) + theme_bw()
+
+# mean absolute distance from each chp to closest estimated one
+distrnsegs %>%
+  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meand*NPOINTS, lty=factor(run))) +
+  facet_wrap(~scenario) + theme_bw()
+
+# fraction of simulations reporting a chp within 0.05 of true seg ("TPR")
+distrnsegs %>%
+  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=tpr, lty=factor(run))) +
+  facet_wrap(~scenario) + theme_bw()
+
+# see raw segments for one case
+filter(allsegs, scenario==2, run==2, i<=100) %>%
   ungroup() %>%
-  mutate(xpos=NPOINTS+(run==2)*5+i*0.1, run=factor(run)) %>%
-  ggplot(aes(x=xpos, col=run)) +
-  geom_segment(aes(y=V1/NPOINTS, yend=V2/NPOINTS, xend=xpos), alpha=0.3) +
-  geom_step(aes(y=floor(0.3*NPOINTS+1)/NPOINTS), col="orange") +
-  geom_hline(yintercept=0.5, col="orange") +
-  geom_text(aes(x=NPOINTS+(run==2)*10, y=0.20, label=round(100*freqLess, 1)),
-            col="black", size=4, data=distrnsegs) +
-  geom_text(aes(x=NPOINTS+(run==2)*10, y=0.25, label=round(100*freqMore, 1)),
-            col="black", size=4, data=distrnsegs) +
-  scale_color_manual(values=c("deepskyblue", "blue2")) +
-  theme_minimal() + xlab("length of time series") + ylab("pos along the series") 
+  ggplot(aes(y=i)) +
+  geom_vline(xintercept=c(0.2, 0.3, 0.5, 0.6, 0.7, 0.8), col="green2", lwd=1) +
+    geom_point(aes(x=V1/NPOINTS), alpha=0.6) + geom_point(aes(x=V2/NPOINTS), alpha=0.6) + 
+  facet_wrap(~NPOINTS) +
+  theme_minimal()
+  
+# Table 1:
+# remember that run2 is the correct (full) run!
+t1 = distrnsegs[,c("scenario", "NPOINTS", "run", "meannseg")] %>%
+  spread(key="run", value="meannseg")
+t2 = distrnsegs[,c("scenario", "NPOINTS", "run", "tpr")] %>%
+  spread(key="run", value="tpr")
+colnames(t1)[3:4] = c("meann.run1", "meann.run2")
+colnames(t2)[3:4] = c("tpr.run1", "tpr.run2")
+full_join(t1, t2, by=c("scenario", "NPOINTS")) %>%
+  filter(NPOINTS %in% c(30, 90, 180, 440, 750)) %>%
+  print.data.frame
 
 
 
 ###
 
+set.seed(54321)
+## 3. just a basic test
 
-niter = 30
-dets = data.frame(iter=1:niter, ndets = 0, s=0, e=0, theta=0)
-for(i in 1:niter){
-  res = run(30)
-  if(is.null(res$segs)){
-    next
-  } else if(!is.matrix(res$segs)){
-    dets[i,] = c(i, 1, res$segs[1], res$segs[2], res$segs[3])
-  } else {
-    dets[i, "ndets"] = nrow(res$segs)
-  }
-}
-dets
+run_scen1(100)
 
-
-ggplot(dets) + geom_point(aes(x=X1, y=iter), col="blue") +
-  geom_point(aes(x=X2, y=iter), col="blue") +
-  theme_minimal()
-
-
-## 1. optimizing runtime
-
-run = function(n){
-  ts = c(rnorm(10, 0, 1), rnorm(5, 3, 1), rnorm(15, 0, 1))
-  ts = rep(ts, length.out=n)
-  pen = autoset_penalty(ts)
-  res = shortsgd(ts, 10, pen, 1)
-  return(res)
-}
-
-mb = microbenchmark(n30 = run(30),
-               n45 = run(45),
-               n60 = run(60), 
-               n90 = run(90),
-               n120 = run(120), 
-               n180 = run(180), 
-               n240 = run(240), times=60)
+mb = microbenchmark(n30 = run_scen1(30),
+               n60 = run_scen1(60), 
+               n120 = run_scen1(120), 
+               n240 = run_scen1(240), 
+               times=30)
 mb
 autoplot(mb) + scale_y_continuous()
 
@@ -240,29 +269,43 @@ summary(lm(time ~ n, data=mbdf))
 # mean runtime = -0.75 ms + 65 us * n
 
 
-
-
-
-
-ts = c(rnorm(40, 0, 1), rnorm(5, 3, 1), rnorm(20, 0, 1), rnorm(5, 3, 1), rnorm(10, 0, 1))
+n = 50
+l1 = floor(n*0.2)
+l2 = floor(n*0.1)
+l3 = floor(n*0.2)
+l4 = floor(n*0.1)
+l5 = floor(n*0.4)
+ts = c(rnorm(l1, 0, 1), rnorm(l2, 2, 1), rnorm(l3, 5, 1), rnorm(l4, 2, 1), rnorm(l5, 0, 1))
 plot(ts)
 
-plot(ts)
+lookback = floor(n*0.33)
+pen = autoset_penalty(ts)
 
-res = shortsgd(ts, 10, pen, 1)
-res$segs
-plot(res$wt, type="l", col="grey40")
-tail(res$wt)
+res.known = shortfixed(ts, 0, lookback, pen, 1)
+res.online = shortsgd(ts, lookback, pen, 1)
+finalwt = res$wt[length(res$wt)]
+res.plugin = shortfixed(ts, finalwt, lookback, pen, 1)
 
-lastw = rep(0, 50)
-plot(NULL, ylim=c(-1,1), xlim=c(1, length(ts)), xlab="t", ylab=expression(w[t]))
-for(i in 1:50){
-  ts = c(rnorm(100, 0, 1), rnorm(5, 3, 1), rnorm(3000, 0, 1))
+res.full = fulldetector_noprune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1)
+microbenchmark(fulldetector_noprune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1), times=10)
 
-  res = shortsgd(ts, 5, 20, 1)
-  lines(res$wt, col="grey40")
-  lastw[i] = res$wt[length(ts)]
+
+run_scen_new = function(n){
+  l1 = floor(n*0.3)
+  l2 = floor(n*0.2)
+  l3 = floor(n*0.5)
+  
+  lookback = floor(n*0.5)
+  ts = c(rnorm(l1, 0, 1), rnorm(l2, 3, 1), rnorm(l3, 0, 1))
+  pen = autoset_penalty(ts)
+  res = shortsgd(ts, lookback, pen, 1)
+
+  res = detector(ts[1], length(ts), lookback, pen, 1)
+  for(t in 2:length(ts)){
+    res = detector.step(res, ts[t])
+  }
+  
+  return(list(wt = res$wt[length(res$wt)], med = median(ts), segs1 = res$segs))
 }
-summary(lastw)
-sd(lastw)
-1/sqrt(3000) # SD of mean over realizations of 3000-long ts
+
+microbenchmark(run_scen_new(240), times=30)
