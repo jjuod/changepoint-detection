@@ -269,7 +269,7 @@ summary(lm(time ~ n, data=mbdf))
 # mean runtime = -0.75 ms + 65 us * n
 
 
-n = 50
+n = 100
 l1 = floor(n*0.2)
 l2 = floor(n*0.1)
 l3 = floor(n*0.2)
@@ -286,8 +286,11 @@ res.online = shortsgd(ts, lookback, pen, 1)
 finalwt = res$wt[length(res$wt)]
 res.plugin = shortfixed(ts, finalwt, lookback, pen, 1)
 
-res.full = fulldetector_noprune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1)
-microbenchmark(fulldetector_noprune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1), times=10)
+res.full = fulldetector_noprune_reference(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1)
+res.full.opt = fulldetector_noprune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1)
+all(res.full$segs == res.full.opt$segs)
+microbenchmark(ref=fulldetector_noprune_reference(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1), 
+               opt=fulldetector_noprune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1), times=10)
 
 
 run_scen_new = function(n){

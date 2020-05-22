@@ -363,9 +363,10 @@ detector <- function(firstpoint, datalen, MAXLOOKBACK, PEN, SD){
   segs[[1]] = matrix(0, nrow=1, ncol=3)
   
   # Detector object:
-  list(ts=firstpoint, bgsizes=bgsizes, wt=wt,
-       SD=SD, LOG2PI=LOG2PI, PEN=PEN, MAXLOOKBACK=MAXLOOKBACK,
-       bestcost=bestcost, segs=segs, possibleKs=possibleKs)
+  structure(list(ts=firstpoint, bgsizes=bgsizes, wt=wt,
+                 SD=SD, LOG2PI=LOG2PI, PEN=PEN, MAXLOOKBACK=MAXLOOKBACK,
+                 bestcost=bestcost, segs=segs, possibleKs=possibleKs),
+            class="detector")
 }
 
 # Add a new point to the time series being analyzed
@@ -448,6 +449,18 @@ detector.step <- function(d, newpoint){
   return(d)
 }
 
+print.detector <- function(d){
+  cat("Detector setup:\n")
+  cat(sprintf("SD = %f / Max segment lenth = %i / Penalty = %f\n", d$SD, d$MAXLOOKBACK, d$PEN))
+  cat(sprintf("Max allowed data length: \n", length(d$wt)))
+  cat(sprintf("Current data length: %i (of %i max allowed)\n", length(d$ts), length(d$wt)))
+  cat("Current segments estimated:\n")
+  print(d$segs[[length(d$segs)]])
+  cat(sprintf("Last theta0 estimate: %f based on %i points\n", d$wt[length(d$ts)], d$bgsizes[length(d$ts)]))
+  cat(sprintf("Last pruning set: %i elements between %i-%i\n", length(d$possibleKs), min(d$possibleKs), max(d$possibleKs)))
+  cat(sprintf("Most recent estimates of F(n):\n"))
+  print(d$bestcost[max(1, length(d$ts)-5):length(d$ts)])
+}
 
 # Full method for detecting in presence of nuisance segments
 # Optimized version
@@ -463,6 +476,9 @@ fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
   possibleKs = c(1)
   # possible starts of nuisances to consider
   possibleKNs = c()
+  
+  # For storing the inner loop detectors starting at each t
+  detectors = vector(mode="list", length=length(ts))
   
   # precompute:
   LOG2PI = log(2*pi*SD^2)
@@ -490,32 +506,33 @@ fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
     # Cost if t came from nuisance (w/ or w/o segments, C'):
     # over all possible nuisances from 1:t to t-MLB:t
     # (length > maxlookback)
+    
     nuiscost = rep(Inf, length(possibleKNs))
-    nuissegs = vector(mode="list", length=length(possibleKNs))
-    nuistheta = rep(-99, length(possibleKNs))
     for(i in seq_along(possibleKNs)){
       t2 = possibleKNs[i]
-      # save other parameters from the inner loop
-      ressgd = shortsgd(ts[(t2+1):t], MAXLOOKBACK, PEN, SD)
+      # Old way:
+      # ressgd = shortsgd(ts[(t2+1):t], MAXLOOKBACK, PEN, SD)
       
-      ### ---------- COPY PASTED INTERNALS: -------------
-      det = detector()
-
-      # Main loop:
-      for(t in 2:length(ts)){
-        detector.step(det)
+      if(is.null(detectors[[t2+1]])){
+        # init the detector for new time point
+        # cat(sprintf("\nCreating a detector at %d\n", t2+1))
+        detectors[[t2+1]] = detector(ts[t2+1], length(ts)-t2, MAXLOOKBACK, PEN, SD)
+        # step it up until current t
+        # (could instead enforce that all this initial part is not checked for S later)
+        for(t3 in (t2+2):t){
+          detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t3])
+        }
+      } else {
+        # or add one new point
+        detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t])
       }
-      #cat(sprintf("Estimated theta0: %.2f\n", wt[t]))
       
-      # form output object
-      output = list(segs = segs[[length(segs)]][-1,,drop=F], wt = wt, cost = bestcost[length(bestcost)])
-      return(output)
-      #### ---------------- END COPY PASTE --------------------
-      
-      nuissegs[[i]] = ressgd$segs
-      nuistheta[i] = ressgd$wt[length(ressgd$wt)]
+      # cat(sprintf("Estimated theta0: %.2f\n", wt[t]))
+
+      # save other parameters from the inner loop
+      lastpos = length(detectors[[t2+1]]$ts)
       # cat(sprintf("Inner loop cost: %.1f , nseg: %d \n", ressgd$cost, nrow(ressgd$segs)))
-      nuiscost[i] = bestcost[t2] + ressgd$cost
+      nuiscost[i] = bestcost[t2] + detectors[[t2+1]]$bestcost[lastpos]
     }
     
     # proposed segment cost:    
@@ -532,10 +549,15 @@ fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
     if(length(possibleKNs)>0){
       bestnuisstart = which.min(nuiscost)   # KN index, not actual positions
       bestnuiscost = nuiscost[bestnuisstart] + PEN2
-      bestnuissegs = nuissegs[[bestnuisstart]]
-      bestnuistheta = nuistheta[bestnuisstart]
-      # First x of the proposed segment:
+      # First x of the proposed nuisance:
       bestnuisstart = possibleKNs[bestnuisstart]+1
+      
+      # Other info of the proposed nuisance:
+      bestdet = detectors[[bestnuisstart]]
+      lastpos = length(bestdet$ts)
+      bestnuistheta = bestdet$wt[lastpos]
+      bestnuissegs = bestdet$segs[[lastpos]][-1,,drop=F]
+      
       # (to avoid recalculating or storing it:)
       # actualFNS = bestnuiscost-PEN2-bestcost[bestnuisstart-1]
       # cat(sprintf("Best nuisance was %d-%d: Fnuis = %.1f + %.1f + P2
@@ -595,8 +617,9 @@ fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
     # print(possibleKs)
     
     # for nuisance segment starts, just add one here - no pruning
-    if(t > MAXLOOKBACK){
-      possibleKNs = c(possibleKNs, t-MAXLOOKBACK) 
+    newNstart = t-MAXLOOKBACK
+    if(newNstart > 0){
+      possibleKNs = c(possibleKNs, newNstart)
     }
     cat(sprintf("After cycle %d, %d possible nuisance starts remain\n",
                 t, length(possibleKNs)))
