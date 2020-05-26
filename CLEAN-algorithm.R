@@ -1,6 +1,9 @@
 ## Changepoint detection, OUR ALGORITHM (unknown theta0)
 ## for change in mean of normal
 
+# empty environment for caching
+cache.env = new.env(parent=emptyenv())
+
 # cost of points from Gaussian w/ given mean, sd
 cost0sq <- function(xs, theta0, sd, log2pi){
   ssq = sum((xs-theta0)^2)
@@ -10,6 +13,14 @@ cost0sq <- function(xs, theta0, sd, log2pi){
 cost1sq <- function(xs, sd, log2pi){
   ssq = sum((xs-mean(xs))^2)
   length(xs)*log2pi + ssq / sd^2
+}
+
+# sx2 and sx: sums of x^2 and x corresponding to this seg
+# n: seg length
+cost1sq.rec <- function(sx2, sx, n, sd, log2pi){
+  c1 = n*log2pi
+  c2 = sx2 - sx^2/n
+  c1+c2/sd^2
 }
 
 autoset_penalty <- function(data, alpha=3, delta=1.1){
@@ -192,151 +203,6 @@ shortfixed <- function(ts, theta0, MAXLOOKBACK, PEN, SD){
   return(output)
 }
 
-# Full method for detecting in presence of nuisance segments
-# Reference copy for comparing against optimized versions
-# theta0: mean of fB
-# MAXLOOKBACK: max length of signal seg
-# SD: sigma of fB, fN, fS, fNS
-# PEN: signal segment penalty
-# PEN2: nuisance penalty
-fulldetector_noprune_reference <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
-  # Initialize:
-  # bestcost[t] := F(all x[1:t])
-  bestcost = c(0)
-  # possible starts of segments to consider
-  possibleKs = c(1)
-  # possible starts of nuisances to consider
-  possibleKNs = c()
-  
-  # precompute:
-  LOG2PI = log(2*pi*SD^2)
-  
-  # Output:
-  # for each t, a matrix of segment starts-ends up to t
-  segs = vector(mode="list", length=length(ts))
-  segs[[1]] = matrix(0, nrow=1, ncol=4)
-  
-  # Main loop:
-  for(t in 2:length(ts)){
-    cat(sprintf("\nCycle %d\n", t))
-    # Cost if t came from background:
-    bgcost = bestcost[t-1] + cost0sq(ts[t], theta0, SD, LOG2PI)
-    
-    # Cost if t came from segment:
-    # over all possible segments from t:t to t-MLB+1:t
-    # (seg length >= 1)
-    segcost = rep(Inf, length(possibleKs))
-    for(i in seq_along(possibleKs)){
-      t2 = possibleKs[i]
-      segcost[i] = bestcost[t2] + cost1sq(ts[(t2+1):t], SD, LOG2PI)
-    }
-    
-    # Cost if t came from nuisance (w/ or w/o segments, C'):
-    # over all possible nuisances from 1:t to t-MLB:t
-    # (length > maxlookback)
-    nuiscost = rep(Inf, length(possibleKNs))
-    nuissegs = vector(mode="list", length=length(possibleKNs))
-    nuistheta = rep(-99, length(possibleKNs))
-    for(i in seq_along(possibleKNs)){
-      t2 = possibleKNs[i]
-      # save other parameters from the inner loop
-      ressgd = shortsgd(ts[(t2+1):t], MAXLOOKBACK, PEN, SD)
-      
-      nuissegs[[i]] = ressgd$segs
-      nuistheta[i] = ressgd$wt[length(ressgd$wt)]
-      # cat(sprintf("Inner loop cost: %.1f , nseg: %d \n", ressgd$cost, nrow(ressgd$segs)))
-      nuiscost[i] = bestcost[t2] + ressgd$cost
-    }
-    
-    # proposed segment cost:    
-    bestsegstart = which.min(segcost)
-    bestsegcost = segcost[bestsegstart] + PEN
-    # First x of the proposed segment:
-    bestsegstart = possibleKs[bestsegstart]+1
-    # cat(sprintf("Best segment was %d-%d: Fseg = %.1f + %.1f + P
-    #             vs F0 = %.1f + %.1f \n",
-    #             bestsegstart, t, bestcost[bestsegstart-1], cost1sq(ts[bestsegstart:t], SD, LOG2PI),
-    #             bestcost[t-1], cost0sq(ts[t], theta0, SD, LOG2PI)))
-
-    # proposed nuisance cost:
-    if(length(possibleKNs)>0){
-      bestnuisstart = which.min(nuiscost)   # KN index, not actual positions
-      bestnuiscost = nuiscost[bestnuisstart] + PEN2
-      bestnuissegs = nuissegs[[bestnuisstart]]
-      bestnuistheta = nuistheta[bestnuisstart]
-      # First x of the proposed segment:
-      bestnuisstart = possibleKNs[bestnuisstart]+1
-      # (to avoid recalculating or storing it:)
-      # actualFNS = bestnuiscost-PEN2-bestcost[bestnuisstart-1]
-      # cat(sprintf("Best nuisance was %d-%d: Fnuis = %.1f + %.1f + P2
-      #           vs F0 = %.1f + %.1f \n",
-      #             bestnuisstart, t, bestcost[bestnuisstart-1], actualFNS,
-      #             bestcost[t-1], cost0sq(ts[t], theta0, SD, LOG2PI)))
-      # cat(sprintf("FB %.1f / FS %.1f / FN %.1f \n", bgcost, bestsegcost, bestnuiscost))
-    } else {
-      bestnuisstart = 0
-      bestnuiscost = Inf
-    }
-    
-    # Is background better than signal or nuisance?
-    # Fill out bestcost, segs, wt for this t
-    if(bgcost < bestsegcost & bgcost < bestnuiscost){
-      bestcost[t] = bgcost
-      # no new changepoints
-      segs[[t]] = segs[[t-1]]
-    } else if (bestsegcost < bestnuiscost) {
-      bestcost[t] = bestsegcost
-      # add a segment
-      newseg = c(bestsegstart, t, mean(ts[bestsegstart:t]), 1)
-      segs[[t]] = rbind(segs[[bestsegstart-1]], newseg)
-    } else {
-      bestcost[t] = bestnuiscost
-      # add a nuisance
-      newseg = c(bestnuisstart, t, bestnuistheta, 2)
-      # add signals overlapping this nuisance
-      if(nrow(bestnuissegs)>0){
-        bestnuissegs = cbind(bestnuissegs, 1)
-        # adjust start-end pos, b/c inner loop reports relative to its start:
-        bestnuissegs[,1] = bestnuisstart + bestnuissegs[,1] - 1
-        bestnuissegs[,2] = bestnuisstart + bestnuissegs[,2] - 1
-        newseg = rbind(newseg, bestnuissegs)
-      }
-      segs[[t]] = rbind(segs[[bestnuisstart-1]], newseg)
-    }
-    
-    # update and prune possible segment starts
-    toprune = rep(F, length(possibleKs))
-    # cat("\nsegcosts:\n")
-    # print(segcost)
-    for(i in seq_along(possibleKs)){
-      if(bestcost[t] <= segcost[i]){
-        toprune[i] = T
-      }
-    }
-    # remove one possible segment start to limit lookback:
-    if(t+1-possibleKs[1]>MAXLOOKBACK){
-      toprune[1] = T
-    }
-    possibleKs = possibleKs[!toprune]
-    possibleKs = c(possibleKs, t)
-    
-    cat(sprintf("After cycle %d, %d possible segment starts remain, from %d to %d\n",
-                t, length(possibleKs), min(possibleKs), max(possibleKs)))
-    # print(possibleKs)
-    
-    # for nuisance segment starts, just add one here - no pruning
-    if(t > MAXLOOKBACK){
-      possibleKNs = c(possibleKNs, t-MAXLOOKBACK) 
-    }
-    cat(sprintf("After cycle %d, %d possible nuisance starts remain\n",
-                t, length(possibleKNs)))
-  }
-  
-  # form output object
-  output = list(segs = segs[[length(segs)]][-1,,drop=F])
-  return(output)
-}
-
 # Constructor for Alg 1 (unknown-background short segment detector)
 # firstpoint: will be used as the initial guess of theta0 (w_1)
 # datalen: max length of input data (for allocating memory)
@@ -373,7 +239,9 @@ detector <- function(firstpoint, datalen, MAXLOOKBACK, PEN, SD){
 # Args:
 # d: a detector object
 # newpoint: x_t
-detector.step <- function(d, newpoint){
+# cache: using cached cost values (REQUIRES: cache.env)
+# startadj: pointer such that startadj+1 value would be t=1 for this detector
+detector.step <- function(d, newpoint, cache=T, startadj=NULL){
   d$ts = c(d$ts, newpoint)
   SD = d$SD
   LOG2PI = d$LOG2PI
@@ -386,7 +254,7 @@ detector.step <- function(d, newpoint){
   # cat(sprintf("\nCycle %d\n", t))
   # Cost if t came from background:
   bgcost = d$bestcost[t-1] + cost0sq(newpoint, d$wt[t-1], SD, LOG2PI)
-  
+
   # Cost if t came from segment:
   # over all possible segments from t:t to t-MLB+1:t
   # (seg length >= 1)
@@ -394,7 +262,23 @@ detector.step <- function(d, newpoint){
   segcost = rep(Inf, length(possibleKs))
   for(i in seq_along(possibleKs)){
     t2 = possibleKs[i]
-    segcost[i] = d$bestcost[t2] + cost1sq(d$ts[(t2+1):t], SD, LOG2PI)
+    segcost[i] = i
+    if(!cache){
+      # recalculate cost every time
+      segcost[i] = d$bestcost[t2] + cost1sq(d$ts[(t2+1):t], SD, LOG2PI)
+    } else {
+      cachedvalue = cache.env$cost1cache[t2+1+startadj, t+startadj]
+      if(is.infinite(cachedvalue)){
+        # first calculation (happens when this segment start was pruned from the main loop). cache
+        sx = cache.env$sxcache[t] - cache.env$sxcache[t2]
+        sx2 = cache.env$sx2cache[t] - cache.env$sx2cache[t2]
+        cache.env$cost1cache[t2+1+startadj, t+startadj] = cost1sq.rec(sx2, sx, t-t2, SD, LOG2PI)
+        segcost[i] = d$bestcost[t2] + cache.env$cost1cache[t2+1+startadj, t+startadj]
+      } else {
+        # cat(sprintf("Looking up cached value for relative t=%d at matrix %d , %d\n", t2+1, t2+1+startadj, t+startadj))
+        segcost[i] = d$bestcost[t2] + cachedvalue
+      }
+    }
   }
   
   # proposed segment cost:    
@@ -463,12 +347,12 @@ print.detector <- function(d){
 }
 
 # Full method for detecting in presence of nuisance segments
-# Optimized version
+# Reference version, with some optimization (n^2.5)
 # theta0: mean of fB
 # SD: sigma of fB, fN, fS, fNS
 # PEN: signal segment penalty
 # PEN2: nuisance penalty
-fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
+fulldetector_noprune_reference <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
   # Initialize:
   # bestcost[t] := F(all x[1:t])
   bestcost = c(0)
@@ -510,9 +394,7 @@ fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
     nuiscost = rep(Inf, length(possibleKNs))
     for(i in seq_along(possibleKNs)){
       t2 = possibleKNs[i]
-      # Old way:
-      # ressgd = shortsgd(ts[(t2+1):t], MAXLOOKBACK, PEN, SD)
-      
+
       if(is.null(detectors[[t2+1]])){
         # init the detector for new time point
         # cat(sprintf("\nCreating a detector at %d\n", t2+1))
@@ -520,11 +402,11 @@ fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
         # step it up until current t
         # (could instead enforce that all this initial part is not checked for S later)
         for(t3 in (t2+2):t){
-          detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t3])
+          detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t3], cache=F)
         }
       } else {
         # or add one new point
-        detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t])
+        detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t], cache=F)
       }
       
       # cat(sprintf("Estimated theta0: %.2f\n", wt[t]))
@@ -626,6 +508,401 @@ fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
   }
   
   # form output object
+  output = list(segs = segs[[length(segs)]][-1,,drop=F])
+  return(output)
+}
+
+# Full method for detecting in presence of nuisance segments
+# Optimzed version
+# theta0: mean of fB
+# SD: sigma of fB, fN, fS, fNS
+# PEN: signal segment penalty
+# PEN2: nuisance penalty
+fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
+  # Initialize:
+  # bestcost[t] := F(all x[1:t])
+  bestcost = c(0)
+  # possible starts of segments to consider
+  possibleKs = c(1)
+  # possible starts of nuisances to consider
+  possibleKNs = c()
+  
+  # For storing the inner loop detectors starting at each t
+  detectors = vector(mode="list", length=length(ts))
+  # For caching seg costs and cumsums of x, x^2
+  # (b/c the same seg might be tested in C0 and multiple C' cycles)
+  # cost0cache?
+  assign("cost1cache", matrix(Inf, nrow=length(ts), ncol=length(ts)), envir = cache.env)
+  assign("sx2cache", cumsum(ts^2), envir = cache.env)
+  assign("sxcache", cumsum(ts), envir = cache.env)
+  
+  # precompute:
+  LOG2PI = log(2*pi*SD^2)
+  
+  # Output:
+  # for each t, a matrix of segment starts-ends up to t
+  segs = vector(mode="list", length=length(ts))
+  segs[[1]] = matrix(0, nrow=1, ncol=4)
+  
+  PRUNETR_K = 0
+  PRUNETR_KN = 0
+  
+  # Main loop:
+  for(t in 2:length(ts)){
+    cat(sprintf("\nCycle %d\n", t))
+    # Cost if t came from background:
+    bgcost = bestcost[t-1] + cost0sq(ts[t], theta0, SD, LOG2PI)
+
+    # Cost if t came from segment:
+    # over all possible segments from t:t to t-MLB+1:t
+    # (seg length >= 1)
+    segcost = rep(Inf, length(possibleKs))
+    for(i in seq_along(possibleKs)){
+      t2 = possibleKs[i]
+      # This is the first computation with x_t, so cache it
+      # \sum_{i=t2+1}^{t} x_i
+      sx = cache.env$sxcache[t] - cache.env$sxcache[t2]
+      # \sum_{i=t2+1}^{t} x^2_i
+      sx2 = cache.env$sx2cache[t] - cache.env$sx2cache[t2]
+      cache.env$cost1cache[t2+1, t] = cost1sq.rec(sx2, sx, t-t2, SD, LOG2PI)
+      segcost[i] = bestcost[t2] + cache.env$cost1cache[t2+1, t]
+    }
+
+    # Cost if t came from nuisance (w/ or w/o segments, C'):
+    # over all possible nuisances from 1:t to t-MLB:t
+    # (length > maxlookback)
+
+    nuiscost = rep(Inf, length(possibleKNs))
+    for(i in seq_along(possibleKNs)){
+      t2 = possibleKNs[i]
+
+      if(is.null(detectors[[t2+1]])){
+        # init the detector for new time point
+        # cat(sprintf("\nCreating a detector at %d\n", t2+1))
+        detectors[[t2+1]] = detector(ts[t2+1], length(ts)-t2, MAXLOOKBACK, PEN, SD)
+        # step it up until current t
+        # (could instead enforce that all this initial part is not checked for S later)
+        for(t3 in (t2+2):t){
+          detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t3], t2, cache=T)
+        }
+      } else {
+        # or add one new point
+        detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t], t2, cache=T)
+      }
+
+      # cat(sprintf("Estimated theta0: %.2f\n", wt[t]))
+
+      # save other parameters from the inner loop
+      lastpos = length(detectors[[t2+1]]$ts)
+      # cat(sprintf("Inner loop cost: %.1f , nseg: %d \n", ressgd$cost, nrow(ressgd$segs)))
+      nuiscost[i] = bestcost[t2] + detectors[[t2+1]]$bestcost[lastpos]
+    }
+
+    # proposed segment cost:
+    bestsegstart = which.min(segcost)
+    bestsegcost = segcost[bestsegstart] + PEN
+    # First x of the proposed segment:
+    bestsegstart = possibleKs[bestsegstart]+1
+    # cat(sprintf("Best segment was %d-%d: Fseg = %.1f + %.1f + P
+    #             vs F0 = %.1f + %.1f \n",
+    #             bestsegstart, t, bestcost[bestsegstart-1], cost1sq(ts[bestsegstart:t], SD, LOG2PI),
+    #             bestcost[t-1], cost0sq(ts[t], theta0, SD, LOG2PI)))
+
+    # proposed nuisance cost:
+    if(length(possibleKNs)>0){
+      bestnuisstart = which.min(nuiscost)   # KN index, not actual positions
+      bestnuiscost = nuiscost[bestnuisstart] + PEN2
+      # First x of the proposed nuisance:
+      bestnuisstart = possibleKNs[bestnuisstart]+1
+
+      # Other info of the proposed nuisance:
+      bestdet = detectors[[bestnuisstart]]
+      lastpos = length(bestdet$ts)
+      bestnuistheta = bestdet$wt[lastpos]
+      bestnuissegs = bestdet$segs[[lastpos]][-1,,drop=F]
+
+      # (to avoid recalculating or storing it:)
+      # actualFNS = bestnuiscost-PEN2-bestcost[bestnuisstart-1]
+      # cat(sprintf("Best nuisance was %d-%d: Fnuis = %.1f + %.1f + P2
+      #           vs F0 = %.1f + %.1f \n",
+      #             bestnuisstart, t, bestcost[bestnuisstart-1], actualFNS,
+      #             bestcost[t-1], cost0sq(ts[t], theta0, SD, LOG2PI)))
+      # cat(sprintf("FB %.1f / FS %.1f / FN %.1f \n", bgcost, bestsegcost, bestnuiscost))
+    } else {
+      bestnuisstart = 0
+      bestnuiscost = Inf
+    }
+
+    # Is background better than signal or nuisance?
+    # Fill out bestcost, segs, wt for this t
+    if(bgcost < bestsegcost & bgcost < bestnuiscost){
+      bestcost[t] = bgcost
+      # no new changepoints
+      segs[[t]] = segs[[t-1]]
+    } else if (bestsegcost < bestnuiscost) {
+      bestcost[t] = bestsegcost
+      # add a segment
+      newseg = c(bestsegstart, t, mean(ts[bestsegstart:t]), 1)
+      segs[[t]] = rbind(segs[[bestsegstart-1]], newseg)
+    } else {
+      bestcost[t] = bestnuiscost
+      # add a nuisance
+      newseg = c(bestnuisstart, t, bestnuistheta, 2)
+      # add signals overlapping this nuisance
+      if(nrow(bestnuissegs)>0){
+        bestnuissegs = cbind(bestnuissegs, 1)
+        # adjust start-end pos, b/c inner loop reports relative to its start:
+        bestnuissegs[,1] = bestnuisstart + bestnuissegs[,1] - 1
+        bestnuissegs[,2] = bestnuisstart + bestnuissegs[,2] - 1
+        newseg = rbind(newseg, bestnuissegs)
+      }
+      segs[[t]] = rbind(segs[[bestnuisstart-1]], newseg)
+    }
+
+    # update and prune possible segment starts
+    toprune = rep(F, length(possibleKs))
+    # cat("\nsegcosts:\n")
+    # print(segcost)
+    for(i in seq_along(possibleKs)){
+      if(bestcost[t] <= segcost[i]){
+        toprune[i] = T
+      }
+    }
+    # remove one possible segment start to limit lookback:
+    if(t+1-possibleKs[1]>MAXLOOKBACK){
+      toprune[1] = T
+    }
+    possibleKs = possibleKs[!toprune]
+    possibleKs = c(possibleKs, t)
+    PRUNETR_K = PRUNETR_K + length(possibleKs)
+
+    # cat(sprintf("After cycle %d, %d possible segment starts remain, from %d to %d\n",
+    #             t, length(possibleKs), min(possibleKs), max(possibleKs)))
+    # # print(possibleKs)
+
+    # for nuisance segment starts, just add one here - no pruning
+    newNstart = t-MAXLOOKBACK
+    if(newNstart > 0){
+      possibleKNs = c(possibleKNs, newNstart)
+    }
+    PRUNETR_KN = PRUNETR_KN + length(possibleKNs)
+    
+    # cat(sprintf("After cycle %d, %d possible nuisance starts remain\n",
+    #             t, length(possibleKNs)))
+  }
+  
+  cat(sprintf("total segments checked: %d (%.2f on average)\n", PRUNETR_K, PRUNETR_K/length(ts)))
+  cat(sprintf("total nuisances checked: %d (%.2f on average)\n", PRUNETR_KN, PRUNETR_KN/length(ts)))
+  # form output object
+  rm("cost1cache", envir=cache.env)
+  rm("sx2cache", envir=cache.env)
+  rm("sxcache", envir=cache.env)
+  output = list(segs = segs[[length(segs)]][-1,,drop=F])
+  return(output)
+}
+
+# Full method for detecting in presence of nuisance segments
+# Optimzed with pruning
+# theta0: mean of fB
+# SD: sigma of fB, fN, fS, fNS
+# PEN: signal segment penalty
+# PEN2: nuisance penalty
+# prune: 0/1/2 = none/partial/full pruning of nuisance starts
+fulldetector_prune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD, prune){
+  # Initialize:
+  # bestcost[t] := F(all x[1:t])
+  bestcost = c(0)
+  # possible starts of segments to consider
+  possibleKs = c(1)
+  # possible starts of nuisances to consider
+  possibleKNs = c()
+  
+  # For storing the inner loop detectors starting at each t
+  detectors = vector(mode="list", length=length(ts))
+  # For caching seg costs and cumsums of x, x^2
+  # (b/c the same seg might be tested in C0 and multiple C' cycles)
+  # cost0cache?
+  assign("cost1cache", matrix(Inf, nrow=length(ts), ncol=length(ts)), envir = cache.env)
+  assign("sx2cache", cumsum(ts^2), envir = cache.env)
+  assign("sxcache", cumsum(ts), envir = cache.env)
+  
+  # precompute:
+  LOG2PI = log(2*pi*SD^2)
+  
+  # Output:
+  # for each t, a matrix of segment starts-ends up to t
+  segs = vector(mode="list", length=length(ts))
+  segs[[1]] = matrix(0, nrow=1, ncol=4)
+  
+  PRUNETR_K = 0
+  PRUNETR_KN = 0
+  
+  # Main loop:
+  for(t in 2:length(ts)){
+    cat(sprintf("\nCycle %d\n", t))
+    # Cost if t came from background:
+    bgcost = bestcost[t-1] + cost0sq(ts[t], theta0, SD, LOG2PI)
+    
+    # Cost if t came from segment:
+    # over all possible segments from t:t to t-MLB+1:t
+    # (seg length >= 1)
+    segcost = rep(Inf, length(possibleKs))
+    for(i in seq_along(possibleKs)){
+      t2 = possibleKs[i]
+      # This is the first computation with x_t, so cache it
+      # \sum_{i=t2+1}^{t} x_i
+      sx = cache.env$sxcache[t] - cache.env$sxcache[t2]
+      # \sum_{i=t2+1}^{t} x^2_i
+      sx2 = cache.env$sx2cache[t] - cache.env$sx2cache[t2]
+      cache.env$cost1cache[t2+1, t] = cost1sq.rec(sx2, sx, t-t2, SD, LOG2PI)
+      segcost[i] = bestcost[t2] + cache.env$cost1cache[t2+1, t]
+    }
+    
+    # Cost if t came from nuisance (w/ or w/o segments, C'):
+    # over all possible nuisances from 1:t to t-MLB:t
+    # (length > maxlookback)
+    
+    nuiscost = rep(Inf, length(possibleKNs))
+    for(i in seq_along(possibleKNs)){
+      t2 = possibleKNs[i]
+      
+      if(is.null(detectors[[t2+1]])){
+        # init the detector for new time point
+        # cat(sprintf("\nCreating a detector at %d\n", t2+1))
+        detectors[[t2+1]] = detector(ts[t2+1], length(ts)-t2, MAXLOOKBACK, PEN, SD)
+        # step it up until current t
+        # (could instead enforce that all this initial part is not checked for S later)
+        for(t3 in (t2+2):t){
+          detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t3], t2, cache=T)
+        }
+      } else {
+        # or add one new point
+        detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t], t2, cache=T)
+      }
+      
+      # cat(sprintf("Estimated theta0: %.2f\n", wt[t]))
+      
+      # save other parameters from the inner loop
+      lastpos = length(detectors[[t2+1]]$ts)
+      # cat(sprintf("Inner loop cost: %.1f , nseg: %d \n", ressgd$cost, nrow(ressgd$segs)))
+      nuiscost[i] = bestcost[t2] + detectors[[t2+1]]$bestcost[lastpos]
+    }
+    
+    # proposed segment cost:
+    bestsegstart = which.min(segcost)
+    bestsegcost = segcost[bestsegstart] + PEN
+    # First x of the proposed segment:
+    bestsegstart = possibleKs[bestsegstart]+1
+    # cat(sprintf("Best segment was %d-%d: Fseg = %.1f + %.1f + P
+    #             vs F0 = %.1f + %.1f \n",
+    #             bestsegstart, t, bestcost[bestsegstart-1], cost1sq(ts[bestsegstart:t], SD, LOG2PI),
+    #             bestcost[t-1], cost0sq(ts[t], theta0, SD, LOG2PI)))
+    
+    # proposed nuisance cost:
+    if(length(possibleKNs)>0){
+      bestnuisstart = which.min(nuiscost)   # KN index, not actual positions
+      bestnuiscost = nuiscost[bestnuisstart] + PEN2
+      # First x of the proposed nuisance:
+      bestnuisstart = possibleKNs[bestnuisstart]+1
+      
+      # Other info of the proposed nuisance:
+      bestdet = detectors[[bestnuisstart]]
+      lastpos = length(bestdet$ts)
+      bestnuistheta = bestdet$wt[lastpos]
+      bestnuissegs = bestdet$segs[[lastpos]][-1,,drop=F]
+      
+      # (to avoid recalculating or storing it:)
+      # actualFNS = bestnuiscost-PEN2-bestcost[bestnuisstart-1]
+      # cat(sprintf("Best nuisance was %d-%d: Fnuis = %.1f + %.1f + P2
+      #           vs F0 = %.1f + %.1f \n",
+      #             bestnuisstart, t, bestcost[bestnuisstart-1], actualFNS,
+      #             bestcost[t-1], cost0sq(ts[t], theta0, SD, LOG2PI)))
+      # cat(sprintf("FB %.1f / FS %.1f / FN %.1f \n", bgcost, bestsegcost, bestnuiscost))
+    } else {
+      bestnuisstart = 0
+      bestnuiscost = Inf
+    }
+    
+    # Is background better than signal or nuisance?
+    # Fill out bestcost, segs, wt for this t
+    if(bgcost < bestsegcost & bgcost < bestnuiscost){
+      bestcost[t] = bgcost
+      # no new changepoints
+      segs[[t]] = segs[[t-1]]
+    } else if (bestsegcost < bestnuiscost) {
+      bestcost[t] = bestsegcost
+      # add a segment
+      newseg = c(bestsegstart, t, mean(ts[bestsegstart:t]), 1)
+      segs[[t]] = rbind(segs[[bestsegstart-1]], newseg)
+    } else {
+      bestcost[t] = bestnuiscost
+      # add a nuisance
+      newseg = c(bestnuisstart, t, bestnuistheta, 2)
+      # add signals overlapping this nuisance
+      if(nrow(bestnuissegs)>0){
+        bestnuissegs = cbind(bestnuissegs, 1)
+        # adjust start-end pos, b/c inner loop reports relative to its start:
+        bestnuissegs[,1] = bestnuisstart + bestnuissegs[,1] - 1
+        bestnuissegs[,2] = bestnuisstart + bestnuissegs[,2] - 1
+        newseg = rbind(newseg, bestnuissegs)
+      }
+      segs[[t]] = rbind(segs[[bestnuisstart-1]], newseg)
+    }
+    
+    # update and prune possible segment starts
+    toprune = rep(F, length(possibleKs))
+    # cat("\nsegcosts:\n")
+    # print(segcost)
+    for(i in seq_along(possibleKs)){
+      if(bestcost[t] <= segcost[i]){
+        toprune[i] = T
+      }
+    }
+    # remove one possible segment start to limit lookback:
+    if(t+1-possibleKs[1]>MAXLOOKBACK){
+      toprune[1] = T
+    }
+    possibleKs = possibleKs[!toprune]
+    possibleKs = c(possibleKs, t)
+    PRUNETR_K = PRUNETR_K + length(possibleKs)
+    
+    # cat(sprintf("After cycle %d, %d possible segment starts remain, from %d to %d\n",
+    #             t, length(possibleKs), min(possibleKs), max(possibleKs)))
+    # # print(possibleKs)
+    
+    # update and prune possible nuisance starts
+    if(prune>0){
+      toprune = rep(F, length(possibleKNs))
+      # cat("\n nuiscosts:\n")
+      # print(nuiscost)
+      if(prune==2){
+        for(i in seq_along(possibleKNs)){
+          if(bestcost[t] <= nuiscost[i]){
+            toprune[i] = T
+          }  
+        }
+      }
+      # TO DO: prune=1 option here
+      
+      possibleKNs = possibleKNs[!toprune]
+    }
+    # once we reach sufficient length, add one each cycle
+    newNstart = t-MAXLOOKBACK
+    if(newNstart > 0){
+      possibleKNs = c(possibleKNs, newNstart)
+    }
+    PRUNETR_KN = PRUNETR_KN + length(possibleKNs)
+    
+    cat(sprintf("After cycle %d, %d possible nuisance starts remain\n",
+                t, length(possibleKNs)))
+  }
+  
+  cat(sprintf("total segments checked: %d (%.2f on average)\n", PRUNETR_K, PRUNETR_K/length(ts)))
+  cat(sprintf("total nuisances checked: %d (%.2f on average)\n", PRUNETR_KN, PRUNETR_KN/length(ts)))
+  # form output object
+  rm("cost1cache", envir=cache.env)
+  rm("sx2cache", envir=cache.env)
+  rm("sxcache", envir=cache.env)
   output = list(segs = segs[[length(segs)]][-1,,drop=F])
   return(output)
 }
