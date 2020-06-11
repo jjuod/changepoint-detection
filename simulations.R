@@ -1,12 +1,11 @@
-# Simulations 1
-
+options(stringsAsFactors = F)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(microbenchmark)
 source("CLEAN-algorithm.R")
 
-
+#### ------ SIMULATIONS 1 --------
 ## For checking consistency and convergence (FIGURE 1 and TABLE 1):
 # generate time series from 3 different scenarios,
 # store the final estimates of w_t from our alg,
@@ -213,9 +212,9 @@ distrnsegs %>%
 #   facet_wrap(~scenario) + theme_bw()
 
 # mean absolute distance from each chp to closest estimated one
-distrnsegs %>%
-  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meand*NPOINTS, lty=factor(run))) +
-  facet_wrap(~scenario) + theme_bw()
+# distrnsegs %>%
+#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meand*NPOINTS, lty=factor(run))) +
+#   facet_wrap(~scenario) + theme_bw()
 
 # fraction of simulations reporting a chp within 0.05 of true seg ("TPR")
 distrnsegs %>%
@@ -244,30 +243,264 @@ full_join(t1, t2, by=c("scenario", "NPOINTS")) %>%
   print.data.frame
 
 
+#### ------ SIMULATIONS 2 --------
+source("CLEAN-algorithm.R")
+
+## PLAN:
+# Q: how many different (and what) scenarios?
+# Need to show: pruning does not damage the final solution;
+#       our method gives the correct number and positions of segments;
+#       our method is better than PELT (fewer segments, correct theta_i)
+# Simulations 2a: pruned (and non-pruned?) algs detect the right number of segments
+#       while standard PELT doesn't
+# Simulations 2b: pruned (and non-pruned?) algs detect the segment positions correctly
+# Table 2: mean numseg and TPR (detection within 0.05n) for each seg type x N x alg.
+# Not sure if alg should include non-pruned - if they're very similar, can go to suppl. 
+# Theta_i for each segment in plain text?
+
+## Does pruning make a difference?
+
+## DATA GENERATION SCENARIOS
+run_scen1_l2 = function(n){
+  l1 = floor(n*0.2)
+  l2 = floor(n*0.1)
+  l3 = floor(n*0.2)
+  l4 = floor(n*0.2)
+  l5 = floor(n*0.3)
+  ts = c(rnorm(l1, 0, 1), rnorm(l2, 2, 1), rnorm(l3, 4, 1), rnorm(l4, 2, 1), rnorm(l5, 0, 1))
+  
+  lookback = floor(n*0.33)
+  pen = autoset_penalty(ts)
+  burnin = min(0.03*n, 2*pen)
+  
+  res.full = fulldetector_prune(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=burnin, prune=0)
+  res.full.pr = fulldetector_prune(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=burnin, prune=2)
+  res.plugin = shortfixed(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, SD=1)
+  
+  return(list(segsf = res.full$segs, segsp = res.full.pr$segs, segsop = cbind(res.plugin$segs, 1)))
+}
+
+run_scen2_l2 = function(n){
+  l1 = floor(n*0.2)
+  l2 = floor(n*0.2) # N only
+  l3 = floor(n*0.1)
+  l4 = floor(n*0.1) # S only
+  l5 = floor(n*0.1)
+  l6 = floor(n*0.1) # S only
+  l7 = floor(n*0.2)
+  ts = c(rnorm(l1, 0, 1), rnorm(l2, 1, 1), rnorm(l3, 0, 1), rnorm(l4, 3, 1),
+         rnorm(l5, 0, 1), rnorm(l6, -3, 1), rnorm(l7, 0, 1))
+  
+  lookback = floor(n*0.15)
+  pen = autoset_penalty(ts)
+  burnin = min(0.03*n, 2*pen)
+  
+  res.full = fulldetector_prune(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=burnin, prune=0)
+  res.full.pr = fulldetector_prune(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=burnin, prune=2)
+  res.plugin = shortfixed(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, SD=1)
+  
+  return(list(segsf = res.full$segs, segsp = res.full.pr$segs, segsop = cbind(res.plugin$segs, 1)))
+}
+
+## RUN THE SIMULATIONS:
+allsegs2 = matrix(0, ncol=8)
+ntotest2 = c(30, 60, 100, 150, 240)
+niter2 = 200
+
+# Args: N at which to run, and vector of iteration numbers
+cycle_l2 = function(NPOINTS, iters){
+  temp = matrix(0, ncol=8)
+  print(sprintf("Working on n=%d", NPOINTS))
+  for(i in iters){
+    print(i)
+    res = run_scen1_l2(NPOINTS)
+    
+    temp = rbind(temp, cbind(res$segsf, NPOINTS, i, 1, 1))
+    temp = rbind(temp, cbind(res$segsp, NPOINTS, i, 2, 1))
+    temp = rbind(temp, cbind(res$segsop, NPOINTS, i, 3, 1))
+  }
+  return(temp)
+}
+
+cycle2_l2 = function(NPOINTS, iters){
+  temp = matrix(0, ncol=8)
+  print(sprintf("Working on n=%d", NPOINTS))
+  for(i in iters){
+    print(i)
+    res = run_scen2_l2(NPOINTS)
+    
+    temp = rbind(temp, cbind(res$segsf, NPOINTS, i, 1, 2))
+    temp = rbind(temp, cbind(res$segsp, NPOINTS, i, 2, 2))
+    temp = rbind(temp, cbind(res$segsop, NPOINTS, i, 3, 2))
+  }
+  return(temp)
+}
+
+# (Recommend runing this from R, RStudio doesn't manage to do garbage collection fast enough)
+# source("simulations2-separate.R")
+
+# save output:
+# write.table(allsegs2, "../drafts/changepoint-method/results-sim/sim2-detections.tsv", quote=F, sep="\t", col.names=T, row.names=F)
+# save("allsegs2bkp", file="../drafts/changepoint-method/results-sim/sim2-raw.RData")
+allsegs2 = read.table("../drafts/changepoint-method/results-sim/sim2-detections.tsv", h=T)
+
+
+## PLOT RESULTS
+
+# some summaries
+nrow(allsegs2)
+group_by(allsegs2, NPOINTS, alg, scen) %>% summarize(n())
+
+## Does pruning make any difference?
+dfF = filter(allsegs2, alg=="full")
+dfP = filter(allsegs2, alg=="pruned")
+diffis = bind_rows(anti_join(dfF, dfP, by=c("NPOINTS", "i", "segtype", "scen", "V1", "V2")),
+                   anti_join(dfP, dfF, by=c("NPOINTS", "i", "segtype", "scen", "V1", "V2")))
+
+# Table S1:
+# all iterations that differed
+semi_join(allsegs2, diffis, by=c("NPOINTS", "scen", "i")) %>%
+  filter(alg!="op")
+
+# how frequently something differed?
+diffis_u = unique(diffis[,c("NPOINTS", "scen", "i")])
+nrow(diffis_u) / niter2 / length(ntotest2) / 2  # 2 scenarios
+
+# add the number of segments detected in each iteration
+allsegs2 = group_by(allsegs2, NPOINTS, alg, segtype, i, scen) %>%
+  mutate(nsegs=n())
+
+# see raw segments for one case
+filter(allsegs2, NPOINTS==60, scen==2) %>%
+  ggplot(aes(y=i+0.2*(segtype=="seg"), col=segtype)) +
+  geom_vline(xintercept=c(0.2, 0.3, 0.5, 0.7), col="green2", lwd=1) +
+  geom_segment(aes(x=(V1-1)/NPOINTS, xend=V2/NPOINTS, yend=i+0.2*(segtype=="seg")), alpha=0.8, lwd=1) +
+  facet_wrap(~alg) + scale_color_manual(values=c("black", "blue")) +
+  theme_minimal()
+
+
+# extracts distances to true chps for TPR
+dist2 = function(pos1, pos2, segtype, scen, n){
+  n = n[1]
+  segtype = segtype[1]
+  if(scen[1]==1){
+    if(segtype=="seg"){
+      truepos = floor(c(0.3*n+1, 0.5*n))
+    } else {
+      truepos = floor(c(0.2*n+1, 0.7*n))
+    }  
+  } else {
+    if(segtype=="seg"){
+      truepos = floor(c(0.5*n+1, 0.6*n, 0.7*n+1, 0.8*n))
+    } else {
+      truepos = floor(c(0.2*n+1, 0.4*n))
+    } 
+  }
+  
+  maxd = 0
+  # for each true chp:
+  for(chp in truepos){
+    # pick the closest estimated chp
+    d1 = min(abs(pos1-chp))/n
+    d2 = min(abs(pos2-chp))/n
+    d = min(d1, d2)
+    # get the worst-case (i.e. max over all truepos) d
+    maxd = max(maxd, d)
+  }
+  # max d<thr <=> there was a TP for each true chp within thr
+  return(maxd)
+}
+
+# summary of each iteration (dist for TPR and nsegs)
+segsperiter = summarize(allsegs2, nsegs=max(nsegs),
+                        maxd=dist2(V1, V2, segtype, scen, NPOINTS))
+# fill in missing rows when an iteration returns 0 segs
+temp = expand.grid(NPOINTS=ntotest2, alg=c("pruned", "full", "op"), segtype=c("seg", "nuis"), i=1:niter2, scen=1:2)
+temp$nsegs = 0
+temp$maxd = 1
+segsperiter = anti_join(temp, segsperiter, by=c("NPOINTS", "alg", "segtype", "scen", "i")) %>% 
+  bind_rows(segsperiter, .)
+
+# overall summary for each method
+distrnsegs = group_by(segsperiter, NPOINTS, alg, segtype, scen) %>%
+  mutate(ntrue = 1 + (scen==2 & segtype=="seg")) %>%
+  summarize(meannseg = mean(nsegs), ncorr=sum(nsegs==ntrue)/max(i),
+            tpr = mean(maxd<0.05), meand = mean(maxd), ntrue=max(ntrue)) %>%
+  ungroup
+
+# mean number of segs reported for each n x scenario x run
+distrnsegs %>%
+  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meannseg, lty=factor(alg))) +
+  geom_hline(aes(yintercept=ntrue), col="green") +
+  facet_grid(scen~segtype) + theme_bw()
+# fraction of simulations reporting the right nubmer of segs
+# distrnsegs %>%
+#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=ncorr, lty=factor(run))) +
+#   facet_grid(scen~segtype) + theme_bw()
+
+# mean absolute distance from each chp to closest estimated one
+# distrnsegs %>%
+#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meand*NPOINTS, lty=factor(alg))) +
+#   facet_grid(scen~segtype) + theme_bw()
+
+# fraction of simulations reporting a chp within 0.05 of true seg ("TPR")
+distrnsegs %>%
+  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=tpr, lty=factor(alg))) +
+  facet_grid(scen~segtype) + theme_bw()
+
+# Table 2:
+t1 = distrnsegs[,c("scen", "NPOINTS", "alg", "meannseg", "segtype")] %>%
+  filter(alg!="full") %>%
+  mutate(algseg = paste(alg, segtype, sep="_")) %>%
+  select(-one_of(c("alg", "segtype"))) %>%
+  spread(key="algseg", value="meannseg") %>%
+  select(-"op_nuis")  # no nuisance segs in standard chp algs
+t2 = distrnsegs[,c("scen", "NPOINTS", "alg", "tpr", "segtype")] %>%
+  filter(alg!="full") %>%
+  mutate(algseg = paste(alg, segtype, sep="_")) %>%
+  select(-one_of(c("alg", "segtype"))) %>%
+  spread(key="algseg", value="tpr") %>%
+  select(-"op_nuis")  # no nuisance segs in standard chp algs
+full_join(t1, t2, by=c("scen", "NPOINTS"), suffix=c(".meann", ".tpr")) %>%
+  print.data.frame
+
+
+# Compare theta_i for the first true segment:
+# (using the signal segment w/ most overlap)
+best1seg = filter(allsegs2, scen==1) %>%
+  group_by(alg, segtype, NPOINTS, i) %>%
+  mutate(firstend = pmin(V2, floor(0.5*NPOINTS)),
+         laststart = pmax(V1, floor(0.3*NPOINTS+1))) %>%
+  mutate(overl = pmax(firstend-laststart, 0)) %>%
+  top_n(1, rank(overl, ties.method = "r"))
+extract_theta = function(V1, V2, V3, segtype){
+  if("nuis" %in% segtype & "seg" %in% segtype){
+    ni = segtype=="nuis"
+    si = segtype=="seg"
+    # if segment overlaps a nuisance:
+    if(V1[ni]<=V1[si] & V2[ni]>=V2[si]){
+      thetaN = V3[segtype=="nuis"]
+      thetaS = V3[segtype=="seg"] - thetaN  
+    } else{
+      thetaS = V3[si] 
+    }
+  } else if ("seg" %in% segtype){
+    thetaS = V3[segtype=="seg"]
+  } else {
+    thetaS = NA
+  }
+  return(thetaS)
+}
+group_by(best1seg, alg, NPOINTS, i) %>%
+  summarize(thetaS = extract_theta(V1, V2, V3, segtype)) %>%
+  summarize(m=mean(thetaS, na.rm=T), s=sd(thetaS, na.rm=T), n=sum(!is.na(thetaS)))
+
+
 
 ###
+## Basic tests
 
 set.seed(54321)
-## 3. just a basic test
-
-run_scen1(100)
-
-mb = microbenchmark(n30 = run_scen1(30),
-               n60 = run_scen1(60), 
-               n120 = run_scen1(120), 
-               n240 = run_scen1(240), 
-               times=30)
-mb
-autoplot(mb) + scale_y_continuous()
-
-# time here is in ns
-mbdf = as.data.frame(mb)
-mbdf$n = as.numeric(sub("n([0-9]*)", "\\1", mbdf$expr))
-ggplot(mbdf, aes(x=n, y=time)) + geom_point() + geom_smooth(method="lm") +
-  geom_smooth(method="lm", formula="y ~ I(x^2) + x", col="purple")
-summary(lm(time ~ n, data=mbdf))
-# mean runtime = -0.75 ms + 65 us * n
-
 
 n = 100
 l1 = floor(n*0.2)
@@ -311,4 +544,75 @@ run_scen_new = function(n){
   return(list(wt = res$wt[length(res$wt)], med = median(ts), segs1 = res$segs))
 }
 
-microbenchmark(run_scen_new(240), times=30)
+run_scen_l2 = function(n){
+  l1 = floor(n*0.2)
+  l2 = floor(n*0.1)
+  l3 = floor(n*0.2)
+  l4 = floor(n*0.1)
+  l5 = floor(n*0.4)
+  ts = c(rnorm(l1, 0, 1), rnorm(l2, 2, 1), rnorm(l3, 5, 1), rnorm(l4, 2, 1), rnorm(l5, 0, 1))
+  
+  lookback = floor(n*0.33)
+  pen = autoset_penalty(ts)
+  
+  res.full.opt = fulldetector_prune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=2, prune=2)
+}
+
+mb = microbenchmark(n30 = run_scen_l2(30),
+                    n50 = run_scen_l2(50), 
+                    n70 = run_scen_l2(70), 
+                    n90 = run_scen_l2(90), 
+                    times=20)
+mb
+autoplot(mb) + scale_y_continuous()
+# approx O(n^2.5)
+mbdf = group_by(mb, expr) %>% summarize(ms=median(time)/1e6) %>%
+  mutate(n=c(30,50,70,90))
+mutate(mbdf, ms/n, ms/(n^1.5), ms/(n^2), ms/(n^2.5), ms/(n^3))
+
+# time here is in ns
+mbdf = as.data.frame(mb)
+mbdf$n = as.numeric(sub("n([0-9]*)", "\\1", mbdf$expr))
+ggplot(mbdf, aes(x=n, y=time)) + geom_point() + geom_smooth(method="lm") +
+  geom_smooth(method="lm", formula="y ~ I(x^2) + x", col="purple")
+summary(lm(time ~ n, data=mbdf))
+# mean runtime = -0.75 ms + 65 us * n
+
+source("CLEAN-algorithm.R")
+mb = microbenchmark(n100 = fulldetector_prune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=2, prune=2),
+                    times=20)
+mb
+# n = 100
+# 21, 152, 421
+# no prune: 65, 220, 475
+
+# pruning tests:
+source("CLEAN-algorithm.R")
+l1 = floor(n*0.2)
+l2 = floor(n*0.05)
+l3 = floor(n*0.1)
+l4 = floor(n*0.35)
+l5 = floor(n*0.3)
+
+ts = c(rnorm(l1, 0, 1), rnorm(l2, 1, 1), rnorm(l3, 3, 1), rnorm(l4, 1, 1), rnorm(l5, 0, 1))
+pen = autoset_penalty(ts)
+
+res.full = fulldetector_prune(ts, theta0=0, lookback, PEN=pen/10, PEN2=pen/10, SD=1, BURNIN=10, prune=0)
+res.full.pr = fulldetector_prune(ts, theta0=0, lookback, PEN=pen/10, PEN2=pen/10, SD=1, BURNIN=10, prune=2)
+res.full
+res.full.pr
+all(res.full$segs==res.full.pr$segs)
+res.full.ref = fulldetector_noprune_reference(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1)
+res.full.ref
+
+fulldetector_prune(ts[1:12], theta0=0, lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=10, prune=0)
+shortsgd(ts[13:34], lookback, pen, 1)
+
+cost11 = c()
+cost12 = c()
+for(j in 18:35){
+  cost11 = c(cost11, shortsgd(ts[12:j], lookback, pen, 1)$cost)
+  cost12 = c(cost12, shortsgd(ts[13:j], lookback, pen, 1)$cost + cost0(ts[12], 0, 1))
+}
+plot(cost11, type="l", col="green")
+lines(cost12, col="red")

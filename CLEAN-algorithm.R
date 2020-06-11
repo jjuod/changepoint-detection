@@ -199,7 +199,7 @@ shortfixed <- function(ts, theta0, MAXLOOKBACK, PEN, SD){
   }
 
   # form output object
-  output = list(segs = segs[[length(segs)]][-1,,drop=F])
+  output = list(segs = segs[[length(segs)]][-1,,drop=F], cost = bestcost[length(bestcost)])
   return(output)
 }
 
@@ -270,8 +270,9 @@ detector.step <- function(d, newpoint, cache=T, startadj=NULL){
       cachedvalue = cache.env$cost1cache[t2+1+startadj, t+startadj]
       if(is.infinite(cachedvalue)){
         # first calculation (happens when this segment start was pruned from the main loop). cache
-        sx = cache.env$sxcache[t] - cache.env$sxcache[t2]
-        sx2 = cache.env$sx2cache[t] - cache.env$sx2cache[t2]
+        # cat(sprintf("Cache miss for relative t=%d at matrix %d , %d\n", t2+1, t2+1+startadj, t+startadj))
+        sx = cache.env$sxcache[t+startadj] - cache.env$sxcache[t2+startadj]
+        sx2 = cache.env$sx2cache[t+startadj] - cache.env$sx2cache[t2+startadj]
         cache.env$cost1cache[t2+1+startadj, t+startadj] = cost1sq.rec(sx2, sx, t-t2, SD, LOG2PI)
         segcost[i] = d$bestcost[t2] + cache.env$cost1cache[t2+1+startadj, t+startadj]
       } else {
@@ -333,10 +334,46 @@ detector.step <- function(d, newpoint, cache=T, startadj=NULL){
   return(d)
 }
 
+# Add a set of points to the time series w/o segmenting
+# Args:
+# d: a detector object
+# newpoint: {x_t}
+# cache: using cached cost values (REQUIRES: cache.env)
+# startadj: pointer such that startadj+1 value would be t=1 for this detector
+detector.burnin <- function(d, newpoint, cache=T, startadj=NULL){
+  prevt = length(d$ts)
+  d$ts = c(d$ts, newpoint)
+  SD = d$SD
+  LOG2PI = d$LOG2PI
+  PEN = d$PEN
+  MAXLOOKBACK = d$MAXLOOKBACK
+  t = length(d$ts)
+  
+  # cat(sprintf("\nCycle %d\n", t))
+  # update theta0, assuming all points are from B
+  d$wt[t] = mean(d$ts)
+  
+  # Cost if t came from background:
+  bgcost = d$bestcost[prevt] + cost0sq(newpoint, d$wt[prevt], SD, LOG2PI)
+  
+  # Fill out bestcost, segs, wt for this t
+  d$bestcost[t] = bgcost
+  # no new changepoints
+  d$segs[[t]] = d$segs[[prevt]]
+  # update number of est. bg points
+  d$bgsizes[t] = d$bgsizes[prevt] + length(newpoint)
+  
+  # Override any previous segment starts as the newpoints are assumed to be B:
+  d$possibleKs = c(t)
+  # cat(sprintf("After cycle %d, %d possible starts remain, from %d to %d",
+  # t, length(possibleKs), min(possibleKs), max(possibleKs)))
+  # print(possibleKs)
+  return(d)
+}
+
 print.detector <- function(d){
   cat("Detector setup:\n")
   cat(sprintf("SD = %f / Max segment lenth = %i / Penalty = %f\n", d$SD, d$MAXLOOKBACK, d$PEN))
-  cat(sprintf("Max allowed data length: \n", length(d$wt)))
   cat(sprintf("Current data length: %i (of %i max allowed)\n", length(d$ts), length(d$wt)))
   cat("Current segments estimated:\n")
   print(d$segs[[length(d$segs)]])
@@ -513,7 +550,7 @@ fulldetector_noprune_reference <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, S
 }
 
 # Full method for detecting in presence of nuisance segments
-# Optimzed version
+# Optimized version
 # theta0: mean of fB
 # SD: sigma of fB, fN, fS, fNS
 # PEN: signal segment penalty
@@ -583,11 +620,11 @@ fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
         # step it up until current t
         # (could instead enforce that all this initial part is not checked for S later)
         for(t3 in (t2+2):t){
-          detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t3], t2, cache=T)
+          detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t3], cache=T, startadj=t2)
         }
       } else {
         # or add one new point
-        detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t], t2, cache=T)
+        detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t], cache=T, startadj=t2)
       }
 
       # cat(sprintf("Estimated theta0: %.2f\n", wt[t]))
@@ -707,8 +744,9 @@ fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
 # SD: sigma of fB, fN, fS, fNS
 # PEN: signal segment penalty
 # PEN2: nuisance penalty
+# BURNIN: number of burnin iterations (points assumed to be from fN at the start of each nuisance).
 # prune: 0/1/2 = none/partial/full pruning of nuisance starts
-fulldetector_prune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD, prune){
+fulldetector_prune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD, BURNIN, prune){
   # Initialize:
   # bestcost[t] := F(all x[1:t])
   bestcost = c(0)
@@ -716,6 +754,8 @@ fulldetector_prune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD, prune){
   possibleKs = c(1)
   # possible starts of nuisances to consider
   possibleKNs = c()
+  # could tweak the inner loop to avoid this requirement, but for now:
+  BURNIN = max(2, min(BURNIN, MAXLOOKBACK))
   
   # For storing the inner loop detectors starting at each t
   detectors = vector(mode="list", length=length(ts))
@@ -761,7 +801,7 @@ fulldetector_prune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD, prune){
     # Cost if t came from nuisance (w/ or w/o segments, C'):
     # over all possible nuisances from 1:t to t-MLB:t
     # (length > maxlookback)
-    
+    # BURNIN=2
     nuiscost = rep(Inf, length(possibleKNs))
     for(i in seq_along(possibleKNs)){
       t2 = possibleKNs[i]
@@ -769,15 +809,17 @@ fulldetector_prune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD, prune){
       if(is.null(detectors[[t2+1]])){
         # init the detector for new time point
         # cat(sprintf("\nCreating a detector at %d\n", t2+1))
-        detectors[[t2+1]] = detector(ts[t2+1], length(ts)-t2, MAXLOOKBACK, PEN, SD)
+        det = detector(ts[t2+1], length(ts)-t2, MAXLOOKBACK, PEN, SD)
         # step it up until current t
-        # (could instead enforce that all this initial part is not checked for S later)
+        # det = detector.burnin(det, ts[(t2+2):(t2+BURNIN)], cache=T, startadj=t2)
+        # for(t3 in (t2+BURNIN+1):t){
         for(t3 in (t2+2):t){
-          detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t3], t2, cache=T)
+          det = detector.step(det, ts[t3], cache=T, startadj=t2)
         }
+        detectors[[t2+1]] = det
       } else {
         # or add one new point
-        detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t], t2, cache=T)
+        detectors[[t2+1]] = detector.step(detectors[[t2+1]], ts[t], cache=T, startadj=t2)
       }
       
       # cat(sprintf("Estimated theta0: %.2f\n", wt[t]))
@@ -879,7 +921,7 @@ fulldetector_prune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD, prune){
         for(i in seq_along(possibleKNs)){
           if(bestcost[t] <= nuiscost[i]){
             toprune[i] = T
-          }  
+          }
         }
       }
       # TO DO: prune=1 option here
@@ -903,6 +945,6 @@ fulldetector_prune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD, prune){
   rm("cost1cache", envir=cache.env)
   rm("sx2cache", envir=cache.env)
   rm("sxcache", envir=cache.env)
-  output = list(segs = segs[[length(segs)]][-1,,drop=F])
+  output = list(segs = segs[[length(segs)]][-1,,drop=F], bestcost)
   return(output)
 }
