@@ -119,11 +119,11 @@ colnames(allsegs)[6] = "run"
 colnames(allsegs)[7] = "scenario"
 
 # save output:
-write.table(detsalln, "results-sim/sim1-estimates.tsv", quote=F, sep="\t", col.names=T, row.names=F)
-write.table(allsegs, "results-sim/sim1-detections.tsv", quote=F, sep="\t", col.names=T, row.names=F)
+write.table(detsalln, "../drafts/changepoint-method/results-sim/sim1-estimates.tsv", quote=F, sep="\t", col.names=T, row.names=F)
+write.table(allsegs, "../drafts/changepoint-method/results-sim/sim1-detections.tsv", quote=F, sep="\t", col.names=T, row.names=F)
 
-detsalln = read.table("results-sim/sim1-estimates.tsv", h=T)
-allsegs = read.table("results-sim/sim1-detections.tsv", h=T)
+detsalln = read.table("../drafts/changepoint-method/results-sim/sim1-estimates.tsv", h=T)
+allsegs = read.table("../drafts/changepoint-method/results-sim/sim1-detections.tsv", h=T)
 
 ## PLOT RESULTS
 ## 1. test if the final estimate theta0 converges (FIGURE 1)
@@ -244,108 +244,24 @@ full_join(t1, t2, by=c("scenario", "NPOINTS")) %>%
 
 
 #### ------ SIMULATIONS 2 --------
-source("CLEAN-algorithm.R")
-
-## PLAN:
-# Q: how many different (and what) scenarios?
-# Need to show: pruning does not damage the final solution;
-#       our method gives the correct number and positions of segments;
-#       our method is better than PELT (fewer segments, correct theta_i)
-# Simulations 2a: pruned (and non-pruned?) algs detect the right number of segments
-#       while standard PELT doesn't
-# Simulations 2b: pruned (and non-pruned?) algs detect the segment positions correctly
-# Table 2: mean numseg and TPR (detection within 0.05n) for each seg type x N x alg.
-# Not sure if alg should include non-pruned - if they're very similar, can go to suppl. 
-# Theta_i for each segment in plain text?
-
-## Does pruning make a difference?
-
-## DATA GENERATION SCENARIOS
-run_scen1_l2 = function(n){
-  l1 = floor(n*0.2)
-  l2 = floor(n*0.1)
-  l3 = floor(n*0.2)
-  l4 = floor(n*0.2)
-  l5 = floor(n*0.3)
-  ts = c(rnorm(l1, 0, 1), rnorm(l2, 2, 1), rnorm(l3, 4, 1), rnorm(l4, 2, 1), rnorm(l5, 0, 1))
-  
-  lookback = floor(n*0.33)
-  pen = autoset_penalty(ts)
-  burnin = min(0.03*n, 2*pen)
-  
-  res.full = fulldetector_prune(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=burnin, prune=0)
-  res.full.pr = fulldetector_prune(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=burnin, prune=2)
-  res.plugin = shortfixed(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, SD=1)
-  
-  return(list(segsf = res.full$segs, segsp = res.full.pr$segs, segsop = cbind(res.plugin$segs, 1)))
-}
-
-run_scen2_l2 = function(n){
-  l1 = floor(n*0.2)
-  l2 = floor(n*0.2) # N only
-  l3 = floor(n*0.1)
-  l4 = floor(n*0.1) # S only
-  l5 = floor(n*0.1)
-  l6 = floor(n*0.1) # S only
-  l7 = floor(n*0.2)
-  ts = c(rnorm(l1, 0, 1), rnorm(l2, 1, 1), rnorm(l3, 0, 1), rnorm(l4, 3, 1),
-         rnorm(l5, 0, 1), rnorm(l6, -3, 1), rnorm(l7, 0, 1))
-  
-  lookback = floor(n*0.15)
-  pen = autoset_penalty(ts)
-  burnin = min(0.03*n, 2*pen)
-  
-  res.full = fulldetector_prune(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=burnin, prune=0)
-  res.full.pr = fulldetector_prune(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=burnin, prune=2)
-  res.plugin = shortfixed(ts, theta0=0, MAXLOOKBACK=lookback, PEN=pen, SD=1)
-  
-  return(list(segsf = res.full$segs, segsp = res.full.pr$segs, segsop = cbind(res.plugin$segs, 1)))
-}
+# source("CLEAN-algorithm.R")
 
 ## RUN THE SIMULATIONS:
-allsegs2 = matrix(0, ncol=8)
-ntotest2 = c(30, 60, 100, 150, 240)
-niter2 = 200
+# Recommend running that outside Rstudio, as older versions of it sometimes
+# don't manage to do garbage collection efficiently
+# system("Rscript simulations2-separate.R")
 
-# Args: N at which to run, and vector of iteration numbers
-cycle_l2 = function(NPOINTS, iters){
-  temp = matrix(0, ncol=8)
-  print(sprintf("Working on n=%d", NPOINTS))
-  for(i in iters){
-    print(i)
-    res = run_scen1_l2(NPOINTS)
-    
-    temp = rbind(temp, cbind(res$segsf, NPOINTS, i, 1, 1))
-    temp = rbind(temp, cbind(res$segsp, NPOINTS, i, 2, 1))
-    temp = rbind(temp, cbind(res$segsop, NPOINTS, i, 3, 1))
-  }
-  return(temp)
-}
-
-cycle2_l2 = function(NPOINTS, iters){
-  temp = matrix(0, ncol=8)
-  print(sprintf("Working on n=%d", NPOINTS))
-  for(i in iters){
-    print(i)
-    res = run_scen2_l2(NPOINTS)
-    
-    temp = rbind(temp, cbind(res$segsf, NPOINTS, i, 1, 2))
-    temp = rbind(temp, cbind(res$segsp, NPOINTS, i, 2, 2))
-    temp = rbind(temp, cbind(res$segsop, NPOINTS, i, 3, 2))
-  }
-  return(temp)
-}
-
-# (Recommend runing this from R, RStudio doesn't manage to do garbage collection fast enough)
-# source("simulations2-separate.R")
-
-# save output:
-# write.table(allsegs2, "../drafts/changepoint-method/results-sim/sim2-detections.tsv", quote=F, sep="\t", col.names=T, row.names=F)
-# save("allsegs2bkp", file="../drafts/changepoint-method/results-sim/sim2-raw.RData")
+# read output:
 allsegs2 = read.table("../drafts/changepoint-method/results-sim/sim2-detections.tsv", h=T)
 
+ntotest2 = c(30, 60, 100, 160, 240)
+niter2 = 500
 
 ## PLOT RESULTS
+
+# NOT needs post-processing as it does not distinguish background and segments
+# so we arbitrarily define any segs w/ mean within 1 SD of theta as background:
+allsegs2 = filter(allsegs2, alg!="NOT" | abs(V3)>1)
 
 # some summaries
 nrow(allsegs2)
@@ -360,7 +276,7 @@ diffis = bind_rows(anti_join(dfF, dfP, by=c("NPOINTS", "i", "segtype", "scen", "
 # Table S1:
 # all iterations that differed
 semi_join(allsegs2, diffis, by=c("NPOINTS", "scen", "i")) %>%
-  filter(alg!="op")
+  filter(alg %in% c("full", "pruned"))
 
 # how frequently something differed?
 diffis_u = unique(diffis[,c("NPOINTS", "scen", "i")])
@@ -377,7 +293,6 @@ filter(allsegs2, NPOINTS==60, scen==2) %>%
   geom_segment(aes(x=(V1-1)/NPOINTS, xend=V2/NPOINTS, yend=i+0.2*(segtype=="seg")), alpha=0.8, lwd=1) +
   facet_wrap(~alg) + scale_color_manual(values=c("black", "blue")) +
   theme_minimal()
-
 
 # extracts distances to true chps for TPR
 dist2 = function(pos1, pos2, segtype, scen, n){
@@ -398,13 +313,15 @@ dist2 = function(pos1, pos2, segtype, scen, n){
   }
   
   maxd = 0
-  # for each true chp:
-  for(chp in truepos){
-    # pick the closest estimated chp
-    d1 = min(abs(pos1-chp))/n
-    d2 = min(abs(pos2-chp))/n
+  # for each true segment:
+  for(pairix in seq(1, length(truepos))){
+    chpst = truepos[pairix]
+    # chpe = truepos[pairix+1]
+    # pick the two estimated chps closest to true start and end
+    d1 = min(abs(pos1-chpst))/n
+    d2 = min(abs(pos2-chpst))/n
     d = min(d1, d2)
-    # get the worst-case (i.e. max over all truepos) d
+    # get the worst-case (i.e. max over all pairs) d
     maxd = max(maxd, d)
   }
   # max d<thr <=> there was a TP for each true chp within thr
@@ -415,7 +332,7 @@ dist2 = function(pos1, pos2, segtype, scen, n){
 segsperiter = summarize(allsegs2, nsegs=max(nsegs),
                         maxd=dist2(V1, V2, segtype, scen, NPOINTS))
 # fill in missing rows when an iteration returns 0 segs
-temp = expand.grid(NPOINTS=ntotest2, alg=c("pruned", "full", "op"), segtype=c("seg", "nuis"), i=1:niter2, scen=1:2)
+temp = expand.grid(NPOINTS=ntotest2, alg=c("pruned", "full", "anomaly", "NOT"), segtype=c("seg", "nuis"), i=1:niter2, scen=1:2)
 temp$nsegs = 0
 temp$maxd = 1
 segsperiter = anti_join(temp, segsperiter, by=c("NPOINTS", "alg", "segtype", "scen", "i")) %>% 
@@ -430,39 +347,46 @@ distrnsegs = group_by(segsperiter, NPOINTS, alg, segtype, scen) %>%
 
 # mean number of segs reported for each n x scenario x run
 distrnsegs %>%
-  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meannseg, lty=factor(alg))) +
-  geom_hline(aes(yintercept=ntrue), col="green") +
-  facet_grid(scen~segtype) + theme_bw()
+  filter(alg!="full", segtype=="seg" | alg=="pruned") %>%  # no nuisance segs in standard chp algs
+  ggplot(aes(x=NPOINTS)) +
+  geom_hline(aes(yintercept=ntrue, lty=segtype), col="black") +
+  geom_line(aes(y=meannseg, col=factor(alg), lty=segtype), lwd=1) +
+  scale_linetype_discrete(limits=c("seg", "nuis"), labels=c("signal", "nuisance"), name="ground truth") + 
+  scale_color_discrete(labels=c("anomaly", "NOT", "proposed"), name="detections") + 
+  facet_wrap(~scen, labeller = labeller(scen=c("1"="scenario 1", "2"="scenario 2"))) + theme_bw()
 # fraction of simulations reporting the right nubmer of segs
 # distrnsegs %>%
-#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=ncorr, lty=factor(run))) +
+#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=ncorr, col=factor(alg))) +
 #   facet_grid(scen~segtype) + theme_bw()
 
 # mean absolute distance from each chp to closest estimated one
 # distrnsegs %>%
-#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meand*NPOINTS, lty=factor(alg))) +
-#   facet_grid(scen~segtype) + theme_bw()
+#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meand*NPOINTS, col=factor(alg))) +
+#   facet_grid(scen~segtype) + theme_bw() + ylim(c(0,50))
 
 # fraction of simulations reporting a chp within 0.05 of true seg ("TPR")
 distrnsegs %>%
-  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=tpr, lty=factor(alg))) +
+  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=tpr, col=factor(alg))) +
   facet_grid(scen~segtype) + theme_bw()
 
 # Table 2:
 t1 = distrnsegs[,c("scen", "NPOINTS", "alg", "meannseg", "segtype")] %>%
-  filter(alg!="full") %>%
+  filter(alg!="full", segtype=="seg" | alg=="pruned") %>%  # no nuisance segs in standard chp algs
   mutate(algseg = paste(alg, segtype, sep="_")) %>%
   select(-one_of(c("alg", "segtype"))) %>%
   spread(key="algseg", value="meannseg") %>%
-  select(-"op_nuis")  # no nuisance segs in standard chp algs
+  select("scen", "NPOINTS", "pruned_seg", "pruned_nuis", "anomaly_seg", "NOT_seg")
 t2 = distrnsegs[,c("scen", "NPOINTS", "alg", "tpr", "segtype")] %>%
-  filter(alg!="full") %>%
+  filter(alg!="full", segtype=="seg" | alg=="pruned") %>%  # no nuisance segs in standard chp algs
   mutate(algseg = paste(alg, segtype, sep="_")) %>%
   select(-one_of(c("alg", "segtype"))) %>%
   spread(key="algseg", value="tpr") %>%
-  select(-"op_nuis")  # no nuisance segs in standard chp algs
-full_join(t1, t2, by=c("scen", "NPOINTS"), suffix=c(".meann", ".tpr")) %>%
-  print.data.frame
+  select("scen", "NPOINTS", "pruned_seg", "pruned_nuis", "anomaly_seg", "NOT_seg")
+# one wide table?
+# full_join(t1, t2, by=c("scen", "NPOINTS"), suffix=c(".meann", ".tpr")) %>%
+#   print.data.frame
+print.data.frame(t1)
+print.data.frame(t2)
 
 
 # Compare theta_i for the first true segment:
@@ -493,6 +417,7 @@ extract_theta = function(V1, V2, V3, segtype){
 }
 group_by(best1seg, alg, NPOINTS, i) %>%
   summarize(thetaS = extract_theta(V1, V2, V3, segtype)) %>%
+  mutate(thetaS = ifelse(alg=="anomaly", sqrt(thetaS), thetaS)) %>%  # anomaly reports squared estimate
   summarize(m=mean(thetaS, na.rm=T), s=sd(thetaS, na.rm=T), n=sum(!is.na(thetaS)))
 
 

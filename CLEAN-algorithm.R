@@ -744,9 +744,9 @@ fulldetector_noprune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD){
 # SD: sigma of fB, fN, fS, fNS
 # PEN: signal segment penalty
 # PEN2: nuisance penalty
-# BURNIN: number of burnin iterations (points assumed to be from fN at the start of each nuisance).
 # prune: 0/1/2 = none/partial/full pruning of nuisance starts
-fulldetector_prune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD, BURNIN, prune){
+# BURNIN: number of burnin iterations (points assumed to be from fN at the start of each nuisance).
+fulldetector_prune <- function(ts, theta0, MAXLOOKBACK, PEN, PEN2, SD, prune, BURNIN=2){
   # Initialize:
   # bestcost[t] := F(all x[1:t])
   bestcost = c(0)
