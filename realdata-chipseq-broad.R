@@ -76,7 +76,7 @@ maxpeaklen = round(50e3/DSfactor)
 pen = autoset_penalty(ts)
 
 ## Apply standard epidemic chp detection (anomaly)
-res.anom = capa.uv(ts-finaltheta, beta=pen, beta_tilde=pen, type="mean", min_seg_len=2, max_seg_len=maxpeaklen, transform=identity)
+res.anom = capa.uv((ts-finaltheta)/sd(ts), beta=pen, beta_tilde=pen, type="mean", min_seg_len=2, max_seg_len=maxpeaklen, transform=identity)
 
 # Extract segments, and convert effect sizes to raw means (similar to Alg2)
 res.anom.c = collective_anomalies(res.anom)[,1:3]
@@ -99,6 +99,7 @@ print(anomres)
 
 ## Apply NOT
 # Narrowest-over-threshold detector
+ts = bedHds$m
 res.not = not(ts, method="not", contrast="pcwsConstMean")
 res.not = features(res.not)$cpt
 res.not = cbind(c(1, res.not),
@@ -116,14 +117,12 @@ notres = data.frame(chrom=chr,
 print(notres)
 
 ## Apply PeakSegFPOP
-# tsdf = mutate(bedHf, V2=as.integer(V2), V3=as.integer(V3), V4=as.integer(round(V4)))
-# colnames(tsdf) = c("chrom", "chromStart", "chromEnd", "count")
 tsdf = data.frame(chrom="chr1", chromStart=as.integer(bedHds$pos), chromEnd=as.integer(bedHds$pos+DSfactor),
                   count=as.integer(round(bedHds$m)))
-for(pen in c(1e1, 1e2, 1e3, 1e4, 1e5, 1e6)){
-  res.fpop = PeakSegFPOP_df(tsdf, pen, "/tmp/")$segments
+for(lambda in c(1e1, 1e2, 1e3, 1e4, 1e5, 1e6)){
+  res.fpop = PeakSegFPOP_df(tsdf, lambda, "/tmp/")$segments
   fpopincr = filter(data.frame(res.fpop), status=="peak", mean>finaltheta)
-  cat(sprintf("Penalty %d / Number of detections %d\n", pen, nrow(fpopincr)))
+  cat(sprintf("Penalty %d / Number of detections %d\n", lambda, nrow(fpopincr)))
 }
 # repeat with the chosen penalty (to get between 2-10 segments)
 res.fpop = PeakSegFPOP_df(tsdf, 1e4, "/tmp/")$segments
@@ -132,7 +131,9 @@ fpopincr = filter(data.frame(res.fpop), status=="peak", mean>finaltheta)
 fpopincr$segtype = "S"
 
 ## Apply Algorithm 2:
-# alg2 = fulldetector_prune(ts, theta0=finaltheta, MAXLOOKBACK=maxpeaklen, PEN=pen, PEN2=pen, BURNIN=2, SD=sd(ts), prune=2)
+ts = bedHds$m
+pen = autoset_penalty(ts)
+alg2 = fulldetector_prune(ts, theta0=finaltheta, MAXLOOKBACK=maxpeaklen, PEN=pen, PEN2=pen, BURNIN=2, SD=sd(ts), prune=2)
 print(alg2$segs)
 
 # we are interested only in segments of increased mean:
@@ -186,3 +187,83 @@ save(res.fpop, file=paste0(outprefix, "fpop.RData"))
 write.table(alg2res, paste0(outprefix, "alg2.tsv"), quote=F, row.names=F, sep="\t")
 save(alg2, file=paste0(outprefix, "alg2.RData"))
 ggsave(paste0(outprefix, "merged.png"), plot=p3, width=18, height=15, units="cm")
+
+
+## Calculate fit statistics (BIC/SIC)
+SD = sd(ts)
+
+# BIC
+# Calculates likelihood assuming a normal model with current finaltheta and SD.
+# For nuisance segments, uses only the points N\S.
+#  - df: a dataframe of only the segments detected.
+#  - Requires "start" and "end" columns in ts positions, and "segtype" with S or N
+getBIC = function(df, ts){
+  nparams = 0
+  lastsegend = 0
+  logl = bglogl = 0
+  if(!"segtype" %in% colnames(df)){
+    df$segtype = "S"
+  }
+  
+  # first, mask any S segment points so that they would be excluded
+  # from nuisance and bg likelihoods later
+  # and mask N points for excluding from bg
+  isBg = rep(T, length(ts))
+  isNuis = rep(T, length(ts))
+  for(j in 1:nrow(df)){
+    isBg[df$start[j]:df$end[j]] = F
+    if(df$segtype[j]=="S"){
+      isNuis[df$start[j]:df$end[j]] = F
+    }
+  }
+  
+  for(i in 1:nrow(df)){
+    start = df$start[i]
+    end = df$end[i]
+    nparams = nparams+1
+    
+    # now, treat S segments as usual
+    if(df$segtype[i]=="S"){
+      segx = ts[start:end]
+    } else {
+      # for N segments, first exclude any overlapping S points
+      nuismask = logical(length(ts))
+      nuismask[start:end] = T
+      segx = ts[nuismask & isNuis]
+    }
+    logl = logl - 2*sum(dnorm(segx, mean(segx), SD, log=T))
+  }
+  
+  # deal with bg points
+  bgpoints = ts[isBg]
+  bglogl = bglogl - 2*sum(dnorm(bgpoints, finaltheta, SD, log=T))
+  
+  klogn = nrow(df)*log(length(ts))
+  cat(sprintf("Log-likelihood of background points: %.1f\n", bglogl))
+  cat(sprintf("Log-likelihood of non-bg points: %.1f\n", logl))
+  cat(sprintf("penalty k log(n): %.1f\n", klogn))
+  return(logl+bglogl+klogn)
+}
+
+bic.anom = getBIC(res.anom.c, ts)
+
+# define "background" segments
+res.not.segs = data.frame(res.not[res.not[,3]-finaltheta>0, ])
+colnames(res.not.segs) = c("start", "end", "mean")
+bic.not = getBIC(res.not.segs, ts)
+
+# extract background and convert back to ts coordinates
+res.fpop.segs = filter(res.fpop, status=="peak") %>% arrange(chromStart)
+res.fpop.segs$start = match(res.fpop.segs$chromStart, bedHds$pos)
+res.fpop.segs$end = match(res.fpop.segs$chromEnd, bedHds$pos)
+bic.fpop = getBIC(res.fpop.segs, ts)
+
+res.alg2.segs = data.frame(alg2$segs)
+colnames(res.alg2.segs) = c("start", "end", "mean", "segtype")
+res.alg2.segs$segtype = ifelse(res.alg2.segs$segtype==1, "S", "N")
+bic.alg2 = getBIC(res.alg2.segs, ts)
+
+bic.anom
+bic.not
+bic.fpop
+bic.alg2
