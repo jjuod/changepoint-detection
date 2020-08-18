@@ -1,5 +1,5 @@
 options(stringsAsFactors = F)
-source("CLEAN-algorithm.R")
+source("MAIN-algorithm.R")
 library(anomaly)
 library(not)
 

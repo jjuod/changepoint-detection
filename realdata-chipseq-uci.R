@@ -8,7 +8,7 @@ library(not)
 library(PeakSegDisk)
 
 setwd("~/Documents/gitrep/changepoint-detection/")
-source("CLEAN-algorithm.R")
+source("MAIN-algorithm.R")
 
 # Setup input-output dirs for this window
 datadir = "~/Documents/kiwis/changepointdet/chipseq/H3K36me3_AM_immune/samples/monocyte/McGill0104/problems/"
@@ -105,7 +105,7 @@ notincr = res.not[res.not[,3]>finaltheta,, drop=F]
 notres = data.frame(chrom=chr,
                     chromStart=notincr[,1]*DSfactor + actualstart,
                     chromEnd=notincr[,2]*DSfactor + actualstart+DSfactor, 
-                    segtype="S",
+                    segtype=ifelse(notincr[,3]>finaltheta+sd(ts), "S", "S2"),
                     row.names = NULL)
 print(notres)
 # save output
@@ -124,7 +124,7 @@ save(res.fpop, file=paste0(outprefix, "fpop.RData"))
 
 
 ## Apply Algorithm 2:
-alg2 = fulldetector_prune(ts, theta0=finaltheta, MAXLOOKBACK=maxpeaklen, PEN=pen, PEN2=pen, BURNIN=2, SD=sd(ts), prune=2)
+alg2 = fulldetector_prune(ts, theta0=finaltheta, MAXLOOKBACK=maxpeaklen, PEN=pen, PEN2=pen, SD=sd(ts), prune=2)
 print(alg2$segs)
 
 # we are interested only in segments of increased mean:
@@ -171,9 +171,10 @@ if(nrow(alg2res)>0){
 }
 p2 = p2 +  
   # scale_linetype_manual(values=c("false negative"="dotted", correct="solid"))+
-  scale_size_manual(values=c("false positive"=2, correct=0.7, "N"=7, "S"=6))+
+  scale_size_manual(values=c("false positive"=2, correct=0.7, "N"=7, "S"=6, "S2"=6))+
   scale_fill_manual(values=ann.colors, breaks=names(ann.colors), name="annotations")+
-  scale_color_manual(values=c("S"="blue", "N"="gold"), name="detections", labels=c("nuisance", "signal")) +
+  # scale_color_manual(values=c("S"="blue", "N"="gold"), name="detections", labels=c("nuisance", "signal")) +
+  scale_color_manual(values=c("S"="blue", "N"="gold", "S2"="#D8EFFF"), name="detections", labels=c("nuisance", "signal", "sign. low")) +
   theme_bw()+ theme(legend.key = element_rect(), text=element_text(size=12))+
   guides(fill=guide_legend(order=1),
          # linetype=guide_legend(order=3, override.aes=list(fill="white")),
@@ -195,9 +196,8 @@ SD = sd(ts)
 # For nuisance segments, uses only the points N\S.
 #  - df: a dataframe of only the segments detected.
 #  - Requires "start" and "end" columns in ts positions, and "segtype" with S or N
-getBIC = function(df, ts){
+getBIC = function(df, ts, mu0, sigma0){
   nparams = 0
-  lastsegend = 0
   logl = bglogl = 0
   if(!"segtype" %in% colnames(df)){
     df$segtype = "S"
@@ -229,38 +229,38 @@ getBIC = function(df, ts){
       nuismask[start:end] = T
       segx = ts[nuismask & isNuis]
     }
-    logl = logl - 2*sum(dnorm(segx, mean(segx), SD, log=T))
+    logl = logl - 2*sum(dnorm(segx, mean(segx), sigma0, log=T))
   }
   
   # deal with bg points
   bgpoints = ts[isBg]
-  bglogl = bglogl - 2*sum(dnorm(bgpoints, finaltheta, SD, log=T))
+  bglogl = bglogl - 2*sum(dnorm(bgpoints, mu0, sigma0, log=T))
 
-  klogn = nrow(df)*log(length(ts))
+  # num parameters = num segments x3 (for mean and two endpoints in each) + 2
+  klogn = (3*nrow(df)+2)*log(length(ts))
   cat(sprintf("Log-likelihood of background points: %.1f\n", bglogl))
   cat(sprintf("Log-likelihood of non-bg points: %.1f\n", logl))
   cat(sprintf("penalty k log(n): %.1f\n", klogn))
   return(logl+bglogl+klogn)
 }
 
-bic.anom = getBIC(res.anom.c, ts)
+bic.anom = getBIC(res.anom.c, ts, finaltheta, SD)
 
 # define "background" segments
 res.not.segs = data.frame(res.not[res.not[,3]-finaltheta>0, ])
 colnames(res.not.segs) = c("start", "end", "mean")
-
-bic.not = getBIC(res.not.segs, ts)
+bic.not = getBIC(res.not.segs, ts, finaltheta, SD)
 
 # extract background and convert back to ts coordinates
 res.fpop.segs = filter(res.fpop, status=="peak") %>% arrange(chromStart)
 res.fpop.segs$start = match(res.fpop.segs$chromStart, bedDS$pos)
 res.fpop.segs$end = match(res.fpop.segs$chromEnd, bedDS$pos)
-bic.fpop = getBIC(res.fpop.segs, ts)
+bic.fpop = getBIC(res.fpop.segs, ts, finaltheta, SD)
 
 res.alg2.segs = data.frame(alg2$segs)
 colnames(res.alg2.segs) = c("start", "end", "mean", "segtype")
 res.alg2.segs$segtype = ifelse(res.alg2.segs$segtype==1, "S", "N")
-bic.alg2 = getBIC(res.alg2.segs, ts)
+bic.alg2 = getBIC(res.alg2.segs, ts, finaltheta, SD)
 
 bic.anom
 bic.not

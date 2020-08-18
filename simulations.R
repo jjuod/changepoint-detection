@@ -2,8 +2,7 @@ options(stringsAsFactors = F)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
-library(microbenchmark)
-source("CLEAN-algorithm.R")
+source("MAIN-algorithm.R")
 
 #### ------ SIMULATIONS 1 --------
 ## For checking consistency and convergence (FIGURE 1 and TABLE 1):
@@ -150,7 +149,7 @@ ungroup(dets_sum) %>%
   facet_grid(scenario~., scales = "free_y", labeller="label_both") + 
   scale_x_continuous(breaks=ntotest, minor_breaks = NULL) +
   ylab("quantile value") + theme_bw(base_size = 15) + theme(panel.grid.major.x = element_blank())
-ggsave("results-sim/fig1.png", width=23, height=12, units="cm", dpi=150)
+ggsave("../drafts/changepoint-method/results-sim/fig1.png", width=23, height=12, units="cm", dpi=150)
 
 
 ## 2. test if changepoints are estimated consistently (TABLE 1)
@@ -206,15 +205,6 @@ distrnsegs %>%
   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meannseg, lty=factor(run))) +
   geom_hline(aes(yintercept=ntrue), col="green") +
   facet_wrap(~scenario) + theme_bw()
-# fraction of simulations reporting the right nubmer of segs
-# distrnsegs %>%
-#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=ncorr, lty=factor(run))) +
-#   facet_wrap(~scenario) + theme_bw()
-
-# mean absolute distance from each chp to closest estimated one
-# distrnsegs %>%
-#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meand*NPOINTS, lty=factor(run))) +
-#   facet_wrap(~scenario) + theme_bw()
 
 # fraction of simulations reporting a chp within 0.05 of true seg ("TPR")
 distrnsegs %>%
@@ -244,12 +234,12 @@ full_join(t1, t2, by=c("scenario", "NPOINTS")) %>%
 
 
 #### ------ SIMULATIONS 2 --------
-# source("CLEAN-algorithm.R")
+source("MAIN-algorithm.R")
 
 ## RUN THE SIMULATIONS:
 # Recommend running that outside Rstudio, as older versions of it sometimes
 # don't manage to do garbage collection efficiently
-# system("Rscript simulations2-separate.R")
+system("Rscript simulations2-separate.R")
 
 # read output:
 allsegs2 = read.table("../drafts/changepoint-method/results-sim/sim2-detections.tsv", h=T)
@@ -276,7 +266,9 @@ diffis = bind_rows(anti_join(dfF, dfP, by=c("NPOINTS", "i", "segtype", "scen", "
 # Table S1:
 # all iterations that differed
 semi_join(allsegs2, diffis, by=c("NPOINTS", "scen", "i")) %>%
-  filter(alg %in% c("full", "pruned"))
+  filter(alg %in% c("full", "pruned")) %>%
+  mutate(segtype=ifelse(segtype=="nuis", "N", "S")) %>%
+  .[,c("alg", "scen", "NPOINTS", "i", "segtype", "V1", "V2")]
 
 # how frequently something differed?
 diffis_u = unique(diffis[,c("NPOINTS", "scen", "i")])
@@ -354,15 +346,6 @@ distrnsegs %>%
   scale_linetype_discrete(limits=c("seg", "nuis"), labels=c("signal", "nuisance"), name="ground truth") + 
   scale_color_discrete(labels=c("anomaly", "NOT", "proposed"), name="detections") + 
   facet_wrap(~scen, labeller = labeller(scen=c("1"="scenario 1", "2"="scenario 2"))) + theme_bw()
-# fraction of simulations reporting the right nubmer of segs
-# distrnsegs %>%
-#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=ncorr, col=factor(alg))) +
-#   facet_grid(scen~segtype) + theme_bw()
-
-# mean absolute distance from each chp to closest estimated one
-# distrnsegs %>%
-#   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meand*NPOINTS, col=factor(alg))) +
-#   facet_grid(scen~segtype) + theme_bw() + ylim(c(0,50))
 
 # fraction of simulations reporting a chp within 0.05 of true seg ("TPR")
 distrnsegs %>%
@@ -382,11 +365,27 @@ t2 = distrnsegs[,c("scen", "NPOINTS", "alg", "tpr", "segtype")] %>%
   select(-one_of(c("alg", "segtype"))) %>%
   spread(key="algseg", value="tpr") %>%
   select("scen", "NPOINTS", "pruned_seg", "pruned_nuis", "anomaly_seg", "NOT_seg")
-# one wide table?
-# full_join(t1, t2, by=c("scen", "NPOINTS"), suffix=c(".meann", ".tpr")) %>%
-#   print.data.frame
 print.data.frame(t1)
 print.data.frame(t2)
+
+# Alternatively:
+# Figure 2: bias in the number of segs reported for each n x scenario x run
+distrnsegs %>%
+  filter(alg!="full", segtype=="seg" | alg=="pruned") %>%  # no nuisance segs in standard chp algs
+  mutate(bias = meannseg - ntrue, algseg=factor(ifelse(segtype=="seg", alg, "nuisance"),
+                                          levels=c("anomaly", "NOT", "pruned", "nuisance"))) %>%
+  ggplot(aes(x=NPOINTS)) +
+  geom_hline(aes(yintercept=0), col="grey30") +
+  geom_line(aes(y=bias, col=algseg, lty=algseg), lwd=1) +
+  scale_linetype_manual(values=c("anomaly"=1, "NOT"=1, "pruned"=1, "nuisance"=3),
+                        labels=c("anomaly", "not", "proposed", "proposed (nuisance)"),
+                        name="detections:") + 
+  scale_color_manual(labels=c("anomaly", "not", "proposed", "proposed (nuisance)"), name="detections:",
+                       values =c("dodgerblue2", "mediumturquoise", "coral1", "coral1")) + 
+  facet_wrap(~scen, labeller = labeller(scen=c("1"="scenario 1", "2"="scenario 2"))) + theme_bw() +
+  xlab("n") + ylab(expression(E(~hat(k)-k))) +
+  theme(legend.position = "bottom", text=element_text(size=14))
+ggsave("../drafts/changepoint-method/results-sim/fig2.png", width=17, height=11, units="cm", dpi=150)
 
 
 # Compare theta_i for the first true segment:
@@ -420,124 +419,3 @@ group_by(best1seg, alg, NPOINTS, i) %>%
   mutate(thetaS = ifelse(alg=="anomaly", sqrt(thetaS), thetaS)) %>%  # anomaly reports squared estimate
   summarize(m=mean(thetaS, na.rm=T), s=sd(thetaS, na.rm=T), n=sum(!is.na(thetaS)))
 
-
-
-###
-## Basic tests
-
-set.seed(54321)
-
-n = 100
-l1 = floor(n*0.2)
-l2 = floor(n*0.1)
-l3 = floor(n*0.2)
-l4 = floor(n*0.1)
-l5 = floor(n*0.4)
-ts = c(rnorm(l1, 0, 1), rnorm(l2, 2, 1), rnorm(l3, 5, 1), rnorm(l4, 2, 1), rnorm(l5, 0, 1))
-plot(ts)
-
-lookback = floor(n*0.33)
-pen = autoset_penalty(ts)
-
-res.known = shortfixed(ts, 0, lookback, pen, 1)
-res.online = shortsgd(ts, lookback, pen, 1)
-finalwt = res$wt[length(res$wt)]
-res.plugin = shortfixed(ts, finalwt, lookback, pen, 1)
-
-res.full = fulldetector_noprune_reference(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1)
-res.full.opt = fulldetector_noprune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1)
-all(res.full$segs == res.full.opt$segs)
-microbenchmark(ref=fulldetector_noprune_reference(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1), 
-               opt=fulldetector_noprune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1), times=10)
-
-
-run_scen_new = function(n){
-  l1 = floor(n*0.3)
-  l2 = floor(n*0.2)
-  l3 = floor(n*0.5)
-  
-  lookback = floor(n*0.5)
-  ts = c(rnorm(l1, 0, 1), rnorm(l2, 3, 1), rnorm(l3, 0, 1))
-  pen = autoset_penalty(ts)
-  res = shortsgd(ts, lookback, pen, 1)
-
-  res = detector(ts[1], length(ts), lookback, pen, 1)
-  for(t in 2:length(ts)){
-    res = detector.step(res, ts[t])
-  }
-  
-  return(list(wt = res$wt[length(res$wt)], med = median(ts), segs1 = res$segs))
-}
-
-run_scen_l2 = function(n){
-  l1 = floor(n*0.2)
-  l2 = floor(n*0.1)
-  l3 = floor(n*0.2)
-  l4 = floor(n*0.1)
-  l5 = floor(n*0.4)
-  ts = c(rnorm(l1, 0, 1), rnorm(l2, 2, 1), rnorm(l3, 5, 1), rnorm(l4, 2, 1), rnorm(l5, 0, 1))
-  
-  lookback = floor(n*0.33)
-  pen = autoset_penalty(ts)
-  
-  res.full.opt = fulldetector_prune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=2, prune=2)
-}
-
-mb = microbenchmark(n30 = run_scen_l2(30),
-                    n50 = run_scen_l2(50), 
-                    n70 = run_scen_l2(70), 
-                    n90 = run_scen_l2(90), 
-                    times=20)
-mb
-autoplot(mb) + scale_y_continuous()
-# approx O(n^2.5)
-mbdf = group_by(mb, expr) %>% summarize(ms=median(time)/1e6) %>%
-  mutate(n=c(30,50,70,90))
-mutate(mbdf, ms/n, ms/(n^1.5), ms/(n^2), ms/(n^2.5), ms/(n^3))
-
-# time here is in ns
-mbdf = as.data.frame(mb)
-mbdf$n = as.numeric(sub("n([0-9]*)", "\\1", mbdf$expr))
-ggplot(mbdf, aes(x=n, y=time)) + geom_point() + geom_smooth(method="lm") +
-  geom_smooth(method="lm", formula="y ~ I(x^2) + x", col="purple")
-summary(lm(time ~ n, data=mbdf))
-# mean runtime = -0.75 ms + 65 us * n
-
-source("CLEAN-algorithm.R")
-mb = microbenchmark(n100 = fulldetector_prune(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=2, prune=2),
-                    times=20)
-mb
-# n = 100
-# 21, 152, 421
-# no prune: 65, 220, 475
-
-# pruning tests:
-source("CLEAN-algorithm.R")
-l1 = floor(n*0.2)
-l2 = floor(n*0.05)
-l3 = floor(n*0.1)
-l4 = floor(n*0.35)
-l5 = floor(n*0.3)
-
-ts = c(rnorm(l1, 0, 1), rnorm(l2, 1, 1), rnorm(l3, 3, 1), rnorm(l4, 1, 1), rnorm(l5, 0, 1))
-pen = autoset_penalty(ts)
-
-res.full = fulldetector_prune(ts, theta0=0, lookback, PEN=pen/10, PEN2=pen/10, SD=1, BURNIN=10, prune=0)
-res.full.pr = fulldetector_prune(ts, theta0=0, lookback, PEN=pen/10, PEN2=pen/10, SD=1, BURNIN=10, prune=2)
-res.full
-res.full.pr
-all(res.full$segs==res.full.pr$segs)
-res.full.ref = fulldetector_noprune_reference(ts, theta0=0, lookback, PEN=pen, PEN2=pen, SD=1)
-res.full.ref
-
-fulldetector_prune(ts[1:12], theta0=0, lookback, PEN=pen, PEN2=pen, SD=1, BURNIN=10, prune=0)
-shortsgd(ts[13:34], lookback, pen, 1)
-
-cost11 = c()
-cost12 = c()
-for(j in 18:35){
-  cost11 = c(cost11, shortsgd(ts[12:j], lookback, pen, 1)$cost)
-  cost12 = c(cost12, shortsgd(ts[13:j], lookback, pen, 1)$cost + cost0(ts[12], 0, 1))
-}
-plot(cost11, type="l", col="green")
-lines(cost12, col="red")

@@ -1,3 +1,5 @@
+# Real data analysis: Spanish mortality data
+
 options(stringsAsFactors = F)
 library(ggplot2)
 library(dplyr)
@@ -8,24 +10,15 @@ library(anomaly)
 library(not)
 library(PeakSegDisk)
 setwd("~/Documents/gitrep/changepoint-detection/")
-source("CLEAN-algorithm.R")
+source("MAIN-algorithm.R")
 
 setwd("~/Documents/kiwis/changepointdet/covid/")
 
 dt = read.csv("eurostat/demo_r_mweek3_1_Data.csv")
+
 dt = mutate(dt, ValueNum = sub(":", "", Value)) %>%
   mutate(ValueNum = as.numeric(sub(",", "", ValueNum)))
 dt
-
-filter(dt, AGE=="TOTAL", GEO %in% c("France", "Italy", "Spain", "Sweden", "Switzerland")) %>%
-  ggplot(aes(x=seq_along(TIME), y=ValueNum, col=AGE)) + 
-  geom_point() + facet_wrap(~GEO, scales="free_y") +
-  theme_minimal()
-
-filter(dt, GEO=="Spain") %>%
-  ggplot(aes(x=seq_along(TIME), y=ValueNum)) + 
-  geom_point() + facet_wrap(~AGE, scales="free_y") +
-  theme_minimal()
 
 tsdf = filter(dt, GEO=="Spain", AGE=="Y60-64") %>%
   group_by(TIME) %>%
@@ -97,7 +90,7 @@ colnames(fpopincr) = c("start", "end", "theta", "segtype")
 print(fpopincr)
 
 ## Apply Algorithm 2:
-alg2 = fulldetector_prune(ts, theta0=finaltheta, MAXLOOKBACK=maxpeaklen, PEN=pen, PEN2=pen, BURNIN=2, SD=SD, prune=2)
+alg2 = fulldetector_prune(ts, theta0=finaltheta, MAXLOOKBACK=maxpeaklen, PEN=pen, PEN2=pen, SD=SD, prune=2)
 print(alg2$segs)
 
 alg2res = data.frame(alg2$segs)
@@ -135,7 +128,12 @@ p2 = ggplot(tsdf) +
                     legend.box.margin = margin(4,8,4,8))
 print(p2)
 
-ggsave(paste0("~/Documents/gitrep/drafts/changepoint-method/results-appl/", "det-mortality.png"), width=17, height=10, units="cm")
+outprefix = "../drafts/changepoint-method/results-appl/det-mortality-"
+save(res.anom, file=paste0(outprefix, "anom.RData"))
+save(res.not, file=paste0(outprefix, "not.RData"))
+save(res.fpop, file=paste0(outprefix, "fpop.RData"))
+save(alg2, file=paste0(outprefix, "alg2.RData"))
+ggsave(paste0("../drafts/changepoint-method/results-appl/det-mortality", ".png"), width=17, height=10, units="cm")
 
 
 ## Calculate fit statistics (BIC/SIC)
@@ -145,9 +143,8 @@ ggsave(paste0("~/Documents/gitrep/drafts/changepoint-method/results-appl/", "det
 # For nuisance segments, uses only the points N\S.
 #  - df: a dataframe of only the segments detected.
 #  - Requires "start" and "end" columns in ts positions, and "segtype" with S or N
-getBIC = function(df, ts){
+getBIC = function(df, ts, mu0, sigma0){
   nparams = 0
-  lastsegend = 0
   logl = bglogl = 0
   if(!"segtype" %in% colnames(df)){
     df$segtype = "S"
@@ -179,39 +176,41 @@ getBIC = function(df, ts){
       nuismask[start:end] = T
       segx = ts[nuismask & isNuis]
     }
-    logl = logl - 2*sum(dnorm(segx, mean(segx), SD, log=T))
+    logl = logl - 2*sum(dnorm(segx, mean(segx), sigma0, log=T))
   }
   
   # deal with bg points
   bgpoints = ts[isBg]
-  bglogl = bglogl - 2*sum(dnorm(bgpoints, finaltheta, SD, log=T))
+  bglogl = bglogl - 2*sum(dnorm(bgpoints, mu0, sigma0, log=T))
   
-  klogn = nrow(df)*log(length(ts))
+  # num parameters = num segments x3 (for mean and two endpoints in each) + 2
+  klogn = (3*nrow(df)+2)*log(length(ts))
   cat(sprintf("Log-likelihood of background points: %.1f\n", bglogl))
   cat(sprintf("Log-likelihood of non-bg points: %.1f\n", logl))
   cat(sprintf("penalty k log(n): %.1f\n", klogn))
   return(logl+bglogl+klogn)
 }
 
-bic.anom = getBIC(res.anom.c, ts)
+bic.anom = getBIC(res.anom.c, ts, finaltheta, SD)
 
 # define "background" segments
 res.not.segs = data.frame(res.not[res.not[,3]-finaltheta>0, ])
 colnames(res.not.segs) = c("start", "end", "mean")
-bic.not = getBIC(res.not.segs, ts)
+bic.not = getBIC(res.not.segs, ts, finaltheta, SD)
 
 # extract background and convert back to ts coordinates
 res.fpop.segs = filter(res.fpop, status=="peak") %>% arrange(chromStart)
 res.fpop.segs$start = res.fpop.segs$chromStart
 res.fpop.segs$end = res.fpop.segs$chromEnd
-bic.fpop = getBIC(res.fpop.segs, ts)
+bic.fpop = getBIC(res.fpop.segs, ts, finaltheta, SD)
 
 res.alg2.segs = data.frame(alg2$segs)
 colnames(res.alg2.segs) = c("start", "end", "mean", "segtype")
 res.alg2.segs$segtype = ifelse(res.alg2.segs$segtype==1, "S", "N")
-bic.alg2 = getBIC(res.alg2.segs, ts)
+bic.alg2 = getBIC(res.alg2.segs, ts, finaltheta, SD)
 
 bic.anom
 bic.not
 bic.fpop
 bic.alg2
+
