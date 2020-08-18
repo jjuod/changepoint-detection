@@ -1,5 +1,6 @@
-## Changepoint detection, OUR ALGORITHM (unknown theta0)
-## for change in mean of normal
+# Main implementation of epidemic changepoint detectors (Algorithms 1 and 2)
+# as described in Juodakis J. and Marsland S.:
+# Epidemic changepoint detection in the presence of nuisance changes
 
 # empty environment for caching
 cache.env = new.env(parent=emptyenv())

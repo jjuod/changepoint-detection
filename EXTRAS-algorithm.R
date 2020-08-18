@@ -1,3 +1,7 @@
+# Auxiliary functions for epidemic changepoint detectors
+# as described in Juodakis J. and Marsland S.:
+# Epidemic changepoint detection in the presence of nuisance changes
+
 # Here we keep various parts of our algorithm that are not part
 # of the default method, but may be useful in customizing it.
 
