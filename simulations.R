@@ -134,7 +134,8 @@ temp1 = group_by(detsalln, n, scenario) %>%
 temp2 = group_by(detsalln, n, scenario) %>%
   summarize(estimator="median", q2.5 = quantile(median, 0.025), q25=quantile(median, 0.25),
             q75=quantile(median, 0.75), q97.5=quantile(median, 0.975))
-temp3 = expand.grid(n=ntotest, scenario=1:3) %>%
+temp3 = detsalln[,c("n", "scenario", "fBG")] %>%
+  unique() %>%
   mutate(se = ifelse(scenario==3, sqrt(3), 1) / sqrt(fBG*n) ) %>%
   mutate(estimator="mean", q2.5 = qnorm(0.025, sd=se), q25=qnorm(0.25, sd=se),
             q75=qnorm(0.75, sd=se), q97.5=qnorm(0.975, sd=se))
@@ -148,7 +149,7 @@ ungroup(dets_sum) %>%
   geom_linerange(aes(x=n, col=estimator, ymin=q25, ymax=q75), alpha=0.8, size=2, position=position_dodge(15)) +
   facet_grid(scenario~., scales = "free_y", labeller="label_both") + 
   scale_x_continuous(breaks=ntotest, minor_breaks = NULL) +
-  ylab("quantile value") + theme_bw(base_size = 15) + theme(panel.grid.major.x = element_blank())
+  ylab("quantile value") + theme_bw(base_size = 15) + theme(panel.grid.major.x = element_blank(), legend.text=element_text(size=13))
 ggsave("../drafts/changepoint-method/results-sim/fig1.png", width=23, height=12, units="cm", dpi=150)
 
 
@@ -373,19 +374,21 @@ print.data.frame(t2)
 distrnsegs %>%
   filter(alg!="full", segtype=="seg" | alg=="pruned") %>%  # no nuisance segs in standard chp algs
   mutate(bias = meannseg - ntrue, algseg=factor(ifelse(segtype=="seg", alg, "nuisance"),
-                                          levels=c("anomaly", "NOT", "pruned", "nuisance"))) %>%
+                                          levels=c("anomaly", "NOT", "pruned", "nuisance"),
+                                          labels=c("anomaly", "not", "proposed", "proposed (nuisance)"))) %>%
   ggplot(aes(x=NPOINTS)) +
   geom_hline(aes(yintercept=0), col="grey30") +
   geom_line(aes(y=bias, col=algseg, lty=algseg), lwd=1) +
-  scale_linetype_manual(values=c("anomaly"=1, "NOT"=1, "pruned"=1, "nuisance"=3),
-                        labels=c("anomaly", "not", "proposed", "proposed (nuisance)"),
+  geom_point(aes(y=bias, shape=algseg, col=algseg, alpha=algseg), size=3) +
+  scale_alpha_manual(name="detections:", values=c("anomaly"=1, "not"=1, "proposed"=0, "proposed (nuisance)"=0)) +
+  scale_shape_manual(name="detections:", values=c("anomaly"=4, "not"=20, "proposed"=1, "proposed (nuisance)"=1)) +
+  scale_linetype_manual(values=c("anomaly"=1, "not"=1, "proposed"=1, "proposed (nuisance)"=3),
                         name="detections:") + 
-  scale_color_manual(labels=c("anomaly", "not", "proposed", "proposed (nuisance)"), name="detections:",
-                       values =c("dodgerblue2", "mediumturquoise", "coral1", "coral1")) + 
+  scale_color_manual(name="detections:", values =c("dodgerblue2", "mediumturquoise", "coral1", "coral1")) + 
   facet_wrap(~scen, labeller = labeller(scen=c("1"="scenario 1", "2"="scenario 2"))) + theme_bw() +
   xlab("n") + ylab(expression(E(~hat(k)-k))) +
-  theme(legend.position = "bottom", text=element_text(size=14))
-ggsave("../drafts/changepoint-method/results-sim/fig2.png", width=17, height=11, units="cm", dpi=150)
+  theme(legend.position = "bottom", text=element_text(size=14), legend.text=element_text(size=13), plot.margin = unit(c(0.1,0.3,0,0.1), "cm"))
+ggsave("../drafts/changepoint-method/results-sim/fig2.png", width=17, height=10, units="cm", dpi=150)
 
 
 # Compare theta_i for the first true segment:

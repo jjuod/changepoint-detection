@@ -51,7 +51,7 @@ shortsgd <- function(ts, MAXLOOKBACK, PEN, SD){
   
   # Main loop:
   for(t in 2:length(ts)){
-    # cat(sprintf("\nCycle %d\n", t))
+    cat(sprintf("\nCycle %d\n", t))
     # Cost if t came from background:
     bgcost = bestcost[t-1] + cost0sq(ts[t], wt[t-1], SD, LOG2PI)
     
@@ -72,9 +72,9 @@ shortsgd <- function(ts, MAXLOOKBACK, PEN, SD){
     bestsegstart = possibleKs[bestsegstart]+1
     # cat(sprintf("Best segment was %d-%d: Fsplit = %.1f + %.1f + P
     #             vs F0 = %.1f + %.1f | theta0: %.2f\n",
-    #             bestsegstart, t, bestcost[bestsegstart-1], cost1(ts[bestsegstart:t], SD),
-    #             bestcost[t-1], cost0(ts[t], wt[t-1], SD), wt[t-1]))
-    
+    #             bestsegstart, t, bestcost[bestsegstart-1], cost1sq(ts[bestsegstart:t], SD, LOG2PI),
+    #             bestcost[t-1], cost0sq(ts[t], wt[t-1], SD, LOG2PI), wt[t-1]))
+
     # Is background better than seg?
     # Fill out bestcost, segs, wt for this t
     if(bgcost < bestsegcost){
