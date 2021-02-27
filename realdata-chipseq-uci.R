@@ -11,7 +11,7 @@ setwd("~/Documents/gitrep/changepoint-detection/")
 source("MAIN-algorithm.R")
 
 # Setup input-output dirs for this window
-datadir = "~/Documents/kiwis/changepointdet/chipseq/H3K36me3_AM_immune/samples/monocyte/McGill0104/problems/"
+datadir = "~/Documents/kiwis/changepointpaper/chipseq/H3K36me3_AM_immune/samples/monocyte/McGill0104/problems/"
 probname = "chr12:37856694-109373470/"
 outprefix = paste0("../drafts/changepoint-method/results-appl/McGill0104-", substr(probname, 1, 7), "-")
 
@@ -150,7 +150,8 @@ p2 = ggplot()+
                 ymin=-2.5, ymax=-0.5, fill=annotation),
             # , linetype=fn.status, size=fp.status),
             data=labels, color="black") +
-  geom_point(aes(x=pos/1000, y=m), alpha=0.5, data=bedDS) +
+  # geom_point(aes(x=pos/1000, y=m), alpha=0.5, data=bedDS) +
+  geom_point(aes(x=pos/1000, y=m), shape=21, col="black", fill="grey50", stroke=0.5, data=bedDS) +
   geom_text(aes(x=x, y=y, label=label), data=toplotL, hjust=0) +
   geom_segment(aes(chromStart/1000, -4, xend=chromEnd/1000, yend=-4, color=segtype, size=segtype),
                data=anomres)
@@ -185,7 +186,8 @@ p2 = p2 +
 
 print(p2)
 
-ggsave(paste0(outprefix, "alg2.png"), width=18, height=10, units="cm")
+# ggsave(paste0(outprefix, "alg2.png"), width=18, height=10, units="cm")
+ggsave(paste0(outprefix, "alg2.eps"), width=18, height=10, units="cm", device=cairo_ps)
 
 
 ## Calculate fit statistics (BIC/SIC)

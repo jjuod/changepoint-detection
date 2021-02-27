@@ -18,6 +18,18 @@ cost1 <- function(xs, sd){
   -2 * sum(log(liks))
 }
 
+# cost of points from Gaussian w/ given sd, mean 0
+cost0.var <- function(xs, theta0){
+  liks = dnorm(xs, 0, theta0)
+  -2 * sum(log(liks)) - log(2*pi)
+}
+# cost of points from Gaussian w/ free sd, mean 0
+cost1.var <- function(xs){
+  sest = sqrt(mean(xs^2))
+  liks = dnorm(xs, 0, sest)
+  -2 * sum(log(liks)) - log(2*pi)
+}
+
 # Full method for detecting in presence of nuisance segments
 # Original version, no optimization at all (n^4 basically)
 # theta0: mean of fB

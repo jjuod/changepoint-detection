@@ -12,7 +12,7 @@ library(PeakSegDisk)
 setwd("~/Documents/gitrep/changepoint-detection/")
 source("MAIN-algorithm.R")
 
-setwd("~/Documents/kiwis/changepointdet/covid/")
+setwd("~/Documents/kiwis/changepointpaper/covid/")
 
 dt = read.csv("eurostat/demo_r_mweek3_1_Data.csv")
 
@@ -113,7 +113,7 @@ toplot$y = ifelse(toplot$method=="anomaly", 260, ifelse(toplot$method=="PeakSeg"
 toplotL = group_by(toplot, method) %>% top_n(1, start)
 
 p2 = ggplot(tsdf) +
-  geom_point(aes(x=as.Date(date), y=ValueNum), size=0.5) +
+  geom_point(aes(x=as.Date(date), y=ValueNum), size=1) +
   geom_segment(aes(as.Date(stdate), y, xend=as.Date(edate), yend=y, color=segtype, size=segtype),
                data=toplot) +
   geom_text(aes(x=as.Date(max(tsdf$date)+dweeks(1)), y=y, label=method), hjust=0, data=toplotL) +
@@ -125,15 +125,17 @@ p2 = ggplot(tsdf) +
   guides(size="none", color=guide_legend(order=2, override.aes=list(size=7))) +
   theme_bw()+ theme(text=element_text(size=12), axis.text.x=element_text(size=12, angle=30, vjust=0.8, hjust=1),
                     legend.position = c(0.5, 0.8), legend.box.background = element_rect(color="grey50"),
-                    legend.box.margin = margin(4,8,4,8))
+                    legend.box.margin = margin(4,8,4,8), legend.text=element_text(size=11))
 print(p2)
 
+setwd("~/Documents/gitrep/changepoint-detection/")
 outprefix = "../drafts/changepoint-method/results-appl/det-mortality-"
 save(res.anom, file=paste0(outprefix, "anom.RData"))
 save(res.not, file=paste0(outprefix, "not.RData"))
 save(res.fpop, file=paste0(outprefix, "fpop.RData"))
 save(alg2, file=paste0(outprefix, "alg2.RData"))
-ggsave(paste0("../drafts/changepoint-method/results-appl/det-mortality", ".png"), width=17, height=10, units="cm")
+# ggsave(paste0("../drafts/changepoint-method/results-appl/det-mortality", ".png"), width=17, height=10, units="cm")
+ggsave(paste0("../drafts/changepoint-method/results-appl/det-mortality", ".eps"), width=17, height=10, units="cm", device=cairo_ps)
 
 
 ## Calculate fit statistics (BIC/SIC)

@@ -12,7 +12,7 @@ source("MAIN-algorithm.R")
 
 # Note: first use prep-broad-chipseq.sh to convert UCSC raw data into bedGraph 
 
-indir = "~/Documents/kiwis/changepointdet/chipseq/BROAD/"
+indir = "~/Documents/kiwis/changepointpaper/chipseq/BROAD/"
 bedC = read.table(paste0(indir, "filtered_control.bedGraph"))
 bedH = read.table(paste0(indir, "filtered_h3k27ac.bedGraph"))
 
@@ -156,7 +156,8 @@ toplot2 = mutate(alg2res, treatment=2)
 toplotL = data.frame(label=c("anomaly", "not", "PeakSeg", "proposed"), x=120700, y=c(-3, -6, -9, -12), treatment=2)
 p3 = bind_rows(bedCds,bedHds, .id="treatment") %>%
   ggplot() +
-  geom_point(aes(pos/1000, m), alpha=0.5) +
+  # geom_point(aes(pos/1000, m), alpha=0.5) +
+  geom_point(aes(pos/1000, m), shape=21, col="black", fill="grey50", stroke=0.5) +  # to allow nice exporting to eps
   geom_segment(aes(chromStart/1000, -3, xend=chromEnd/1000, yend=-3, color=segtype),
                data=toplotAn, size=6)+
   geom_segment(aes(chromStart/1000, -6, xend=chromEnd/1000, yend=-6, color=segtype),
@@ -188,8 +189,8 @@ write.table(fpopincr, paste0(outprefix, "fpop.tsv"), quote=F, row.names=F, sep="
 save(res.fpop, file=paste0(outprefix, "fpop.RData"))
 write.table(alg2res, paste0(outprefix, "alg2.tsv"), quote=F, row.names=F, sep="\t")
 save(alg2, file=paste0(outprefix, "alg2.RData"))
-ggsave(paste0(outprefix, "merged.png"), plot=p3, width=18, height=15, units="cm")
-
+# ggsave(paste0(outprefix, "merged.png"), plot=p3, width=18, height=15, units="cm")
+ggsave(paste0(outprefix, "merged.eps"), plot=p3, width=18, height=15, units="cm", device=cairo_ps)
 
 ## Calculate fit statistics (BIC/SIC)
 SD = sd(ts)
