@@ -14,7 +14,7 @@ source("MAIN-algorithm.R")
 ## RUN THE SIMULATIONS:
 # Recommend running that outside Rstudio, as older versions of it sometimes
 # don't manage to do garbage collection efficiently
-system("Rscript simulations1-separate.R")
+#system("Rscript simulations1-separate.R")
 
 ntotest = c(30, 60, 90, 130, 180, 240, 320, 440, 550, 750)
 niter = 500
@@ -43,14 +43,15 @@ dets_sum = bind_rows(temp1, temp2, temp3)
 
 ungroup(dets_sum) %>%
   filter(n<700) %>%
+  mutate(scenario=factor(scenario, labels=c("one segm.", "multiple", "heavy tail"))) %>%
   ggplot() +
-  geom_linerange(aes(x=n, col=estimator, ymin=q2.5, ymax=q97.5), alpha=0.4, size=2, position=position_dodge(15)) +
-  geom_linerange(aes(x=n, col=estimator, ymin=q25, ymax=q75), alpha=0.8, size=2, position=position_dodge(15)) +
-  facet_grid(scenario~., scales = "free_y", labeller="label_both") + 
+  geom_linerange(aes(x=n, col=estimator, ymin=q2.5, ymax=q97.5), alpha=0.5, size=2, position=position_dodge(15)) +
+  geom_linerange(aes(x=n, col=estimator, ymin=q25, ymax=q75), alpha=0.9, size=2, position=position_dodge(15)) +
+  facet_grid(scenario~., scales = "free_y") + 
   scale_x_continuous(breaks=ntotest, minor_breaks = NULL) +
   ylab("quantile value") + theme_bw(base_size = 15) + theme(panel.grid.major.x = element_blank(), legend.text=element_text(size=13))
 # ggsave("../drafts/changepoint-method/results-sim/fig1.png", width=23, height=12, units="cm", dpi=150)
-ggsave("../drafts/changepoint-method/results-sim/fig1.eps", width=23, height=12, units="cm", device=cairo_ps, fallback_resolution=600)
+ggsave("../drafts/changepoint-method/v21may/fig1.eps", width=23, height=12, units="cm", device=cairo_ps, fallback_resolution=600)
 
 
 ## 2. test if changepoints are estimated consistently (TABLE 1)
@@ -83,6 +84,9 @@ dist = function(pos1, pos2, scen, n){
   # max d<thr <=> there was a TP for each true chp within thr
   return(maxd)
 }
+# attach distances to the nearest true chp
+# allsegs_dist = mutate(allsegs, dists=dist(V1, V2, scenario, NPOINTS))
+# TODO
 
 # summary of each iteration (dist for TPR and nsegs)
 segsperiter = summarize(allsegs, nsegs=max(nsegs),
@@ -146,50 +150,8 @@ tableS2 %>%
 
 
 #### ------ SIMULATIONS 2 --------
-source("MAIN-algorithm.R")
-
-## RUN THE SIMULATIONS:
-# Recommend running that outside Rstudio, as older versions of it sometimes
-# don't manage to do garbage collection efficiently
-system("Rscript simulations2-separate.R")
-
-# read output:
-allsegs2 = read.table("../drafts/changepoint-method/results-sim/sim2-detections.tsv", h=T)
-
-ntotest2 = c(30, 60, 100, 150, 220)
-niter2 = 500
-
-## PLOT RESULTS
-
-# NOT needs post-processing as it does not distinguish background and segments
-# so we arbitrarily define any segs w/ mean within 1 SD of theta as background:
-allsegs2 = filter(allsegs2, alg!="NOT" | abs(V3)>1)
-
-# some summaries
-nrow(allsegs2)
-group_by(allsegs2, NPOINTS, alg, scen) %>% summarize(n())
-
-## Does pruning make any difference?
-dfF = filter(allsegs2, alg=="full")
-dfP = filter(allsegs2, alg=="pruned")
-diffis = bind_rows(anti_join(dfF, dfP, by=c("NPOINTS", "i", "segtype", "scen", "V1", "V2")),
-                   anti_join(dfP, dfF, by=c("NPOINTS", "i", "segtype", "scen", "V1", "V2")))
-
-# Table S2:
-# all iterations that differed
-semi_join(allsegs2, diffis, by=c("NPOINTS", "scen", "i")) %>%
-  filter(alg %in% c("full", "pruned"), scen %in% 1:2) %>%   # skip scenario 3 as that one has more differences
-  mutate(segtype=ifelse(segtype=="nuis", "N", "S")) %>%
-  .[,c("alg", "scen", "NPOINTS", "i", "segtype", "V1", "V2")]
-
-# how frequently something differed?
-diffis_u = unique(diffis[,c("NPOINTS", "scen", "i")])
-table(diffis_u$scen)
-nrow(diffis_u) / niter2 / length(ntotest2) / 3  # 3 scenarios
-
-# add the number of segments detected in each iteration
-allsegs2 = group_by(allsegs2, NPOINTS, alg, segtype, i, scen) %>%
-  mutate(nsegs=n())
+# main processing oved to simulations2-parsing.R
+# this is just leftover testing scripts
 
 # see raw segments for one case
 # filter(allsegs2, NPOINTS==60, scen==2) %>%
@@ -204,152 +166,95 @@ filter(allsegs2, NPOINTS==220, scen==1, alg=="sparse", i<100) %>%
   geom_segment(aes(x=(V1-1)/NPOINTS, xend=V2/NPOINTS, yend=i+0.2*(segtype=="seg")), alpha=0.8, lwd=1) +
   facet_wrap(~alg) + scale_color_manual(values=c("black", "blue")) +
   theme_minimal()
+filter(allsegs2, NPOINTS==60, scen==1, alg=="full", i<100) %>%
+    ggplot(aes(y=i+0.2*(segtype=="seg"), col=segtype)) +
+    geom_vline(xintercept=c(0.2, 0.3, 0.5, 0.7), col="green2", lwd=1) +
+    geom_segment(aes(x=(V1-1)/NPOINTS, xend=V2/NPOINTS, yend=i+0.2*(segtype=="seg")), alpha=0.8, lwd=1) +
+    facet_wrap(~alg) + scale_color_manual(values=c("black", "blue")) +
+    theme_minimal()
 
+filter(allsegs2, NPOINTS==60, scen==3, alg %in% c("full", "anomaly"), i<60) %>%
+    ggplot(aes(y=i+0.2*(segtype=="seg"), col=segtype)) +
+    geom_vline(xintercept=c(0.2, 0.3, 0.5, 0.7), col="green2", lwd=1) +
+    geom_segment(aes(x=(V1-1)/NPOINTS, xend=V2/NPOINTS, yend=i+0.2*(segtype=="seg")), alpha=0.8, lwd=1) +
+    facet_wrap(~alg) + scale_color_manual(values=c("black", "blue")) +
+    theme_minimal()
 
-# extracts distances to true chps for TPR
-dist2 = function(pos1, pos2, segtype, scen, n){
-  n = n[1]
-  segtype = segtype[1]
-  if(scen[1]==1){
-    if(segtype=="seg"){
-      truepos = floor(c(0.3*n+1, 0.5*n))
-    } else {
-      truepos = floor(c(0.2*n+1, 0.7*n))
-    }  
-  } else if(scen[1]==2){
-    if(segtype=="seg"){
-      truepos = floor(c(0.5*n+1, 0.6*n, 0.7*n+1, 0.8*n))
-    } else {
-      truepos = floor(c(0.2*n+1, 0.4*n))
+# NOT reports [start-1, end] positions it seems, so this fix may be needed
+# allsegs2$V1[allsegs2$alg=="NOT"] = allsegs2$V1[allsegs2$alg=="NOT"]+1
+# allsegs2$V2[allsegs2$alg=="NOT"] = allsegs2$V2[allsegs2$alg=="NOT"]+1
+
+# extracts distances to true chps for TPR, ignoring the structure
+get_dist_errors2 = function(pos1, pos2, scen, n, tpdf){
+    truepos = tpdf$truepos[tpdf$scen==scen[1] & tpdf$n==n[1]]
+    
+    # for each true segment, calculate distance to chp, in points:
+    d = rep(Inf, length(truepos))
+    for(pairix in seq(length(truepos))){
+        chp = truepos[pairix]
+        # pick the closest estimated chp from either start or end columns
+        d1 = min(abs(pos1-chp))
+        d2 = min(abs(pos2-chp))
+        d[pairix] = min(d1, d2)
     }
-  } else {
-    l1 = floor(n*0.1)
-    l2 = floor(n*0.05)
-    l3 = ceiling(n*0.05)
-    # Note that the starts and ends are interleaved to maintain pairs
-    truepos = c(rbind(l1+1 + 0:8*(l2+l3),  # starts
-                      l1 + l2 + 0:8*(l2+l3)))  # ends
-  }
-  
-  maxd = 0
-  # for each true segment:
-  for(pairix in seq(1, length(truepos))){
-    chpst = truepos[pairix]
-    # chpe = truepos[pairix+1]
-    # pick the two estimated chps closest to true start and end
-    d1 = min(abs(pos1-chpst))/n
-    d2 = min(abs(pos2-chpst))/n
-    d = min(d1, d2)
-    # get the worst-case (i.e. max over all pairs) d
-    maxd = max(maxd, d)
-  }
-  # max d<thr <=> there was a TP for each true chp within thr
-  return(maxd)
+    # d<thr <=> there was a TP for this true chp within thr
+    return(d)
 }
-
-# summary of each iteration (dist for TPR and nsegs)
-segsperiter = summarize(allsegs2, nsegs=max(nsegs),
-                        maxd=dist2(V1, V2, segtype, scen, NPOINTS))
-# fill in missing rows when an iteration returns 0 segs
-temp = expand.grid(NPOINTS=ntotest2, alg=c("pruned", "full", "anomaly", "NOT", "aPELT", "sparse"), segtype=c("seg", "nuis"), i=1:niter2, scen=1:3)
-temp$nsegs = 0
-temp$maxd = 1
-segsperiter = anti_join(temp, segsperiter, by=c("NPOINTS", "alg", "segtype", "scen", "i")) %>% 
-  bind_rows(segsperiter, .)
-
-# overall summary for each method
-distrnsegs = group_by(segsperiter, NPOINTS, alg, segtype, scen) %>%
-  mutate(ntrue = ifelse(scen==3, ifelse(segtype=="seg", 9, 0),
-                  ifelse(scen==2, ifelse(segtype=="seg", 2, 1),
-                         1))) %>%
-  summarize(meannseg = mean(nsegs), ncorr=sum(nsegs==ntrue)/max(i),
-            tpr = mean(maxd<0.05), meand = mean(maxd), ntrue=max(ntrue)) %>%
-  ungroup
-
-# mean number of segs reported for each n x scenario x run
-distrnsegs %>%
-  filter(alg!="full", segtype=="seg" | alg=="pruned") %>%  # no nuisance segs in standard chp algs
-  ggplot(aes(x=NPOINTS)) +
-  geom_hline(aes(yintercept=ntrue, lty=segtype), col="black") +
-  geom_line(aes(y=meannseg, col=factor(alg), lty=segtype), lwd=1) +
-  scale_linetype_discrete(limits=c("seg", "nuis"), labels=c("signal", "nuisance"), name="ground truth") + 
-  scale_color_discrete(labels=c("aPELT", "anomaly", "NOT", "sparse", "proposed"),
-                       breaks=c("aPELT", "anomaly", "NOT", "sparse", "pruned"), name="detections") + 
-  facet_wrap(~scen, labeller = labeller(scen=c("1"="scenario 1", "2"="scenario 2", "3"="scenario 3"))) + theme_bw()
-
-# fraction of simulations reporting a chp within 0.05 of true seg ("TPR")
-distrnsegs %>%
-  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=tpr, col=factor(alg))) +
-  facet_grid(scen~segtype) + theme_bw()
-
-# Table 2:
-t1 = distrnsegs[,c("scen", "NPOINTS", "alg", "meannseg", "segtype")] %>%
-  filter(alg!="full", segtype=="seg" | alg=="pruned") %>%  # no nuisance segs in standard chp algs
-  mutate(algseg = paste(alg, segtype, sep="_")) %>%
-  select(-one_of(c("alg", "segtype"))) %>%
-  spread(key="algseg", value="meannseg") %>%
-  select("scen", "NPOINTS", "pruned_seg", "pruned_nuis", "anomaly_seg", "aPELT_seg", "sparse_seg", "NOT_seg")
-t2 = distrnsegs[,c("scen", "NPOINTS", "alg", "tpr", "segtype")] %>%
-  filter(alg!="full", segtype=="seg" | alg=="pruned") %>%  # no nuisance segs in standard chp algs
-  mutate(algseg = paste(alg, segtype, sep="_")) %>%
-  select(-one_of(c("alg", "segtype"))) %>%
-  spread(key="algseg", value="tpr") %>%
-  select("scen", "NPOINTS", "pruned_seg", "pruned_nuis", "anomaly_seg", "aPELT_seg", "sparse_seg", "NOT_seg")
-print.data.frame(t1)
-print.data.frame(t2)
-
-# Alternatively:
-# Figure 2: bias in the number of segs reported for each n x scenario x run
-distrnsegs %>%
-  filter(alg!="full", segtype=="seg" | alg=="pruned") %>%  # no nuisance segs in standard chp algs
-  mutate(bias = meannseg - ntrue, algseg=factor(ifelse(segtype=="seg", alg, "nuisance"),
-                                          levels=c("anomaly", "aPELT", "sparse", "NOT", "pruned", "nuisance"),
-                                          labels=c("anomaly", "aPELT", "sparse", "not", "proposed", "proposed (nuisance)"))) %>%
-  ggplot(aes(x=NPOINTS)) +
-  geom_hline(aes(yintercept=0), col="grey30") +
-  geom_line(aes(y=bias, col=algseg, lty=algseg), lwd=1) +
-  geom_point(aes(y=bias, shape=algseg, col=algseg, alpha=algseg), size=3) +
-  scale_alpha_manual(name="detections:", values=c("anomaly"=0, "aPELT"=1, "sparse"=1, "not"=1, "proposed"=0, "proposed (nuisance)"=0)) +
-  scale_shape_manual(name="detections:", values=c("anomaly"=17, "aPELT"=4, "sparse"=15, "not"=20, "proposed"=1, "proposed (nuisance)"=1)) +
-  scale_linetype_manual(values=c("anomaly"=1, "aPELT"=1, "sparse"=1, "not"=1, "proposed"=1, "proposed (nuisance)"=3),
-                        name="detections:") +
-  scale_color_manual(name="detections:", values =c("dodgerblue2", "blue4", "mediumturquoise", "skyblue1", "coral1", "coral1")) +
-  facet_wrap(~scen, labeller = labeller(scen=c("1"="scenario 1", "2"="scenario 2", "3"="scenario 3")), scales="free_y") +
-  theme_bw() + xlab("n") + ylab(expression(E(~hat(k)-k))) +
-  theme(legend.position = "bottom", text=element_text(size=14), legend.text=element_text(size=13), plot.margin = unit(c(0.1,0.3,0,0.1), "cm"))
-# ggsave("../drafts/changepoint-method/results-sim/fig2.png", width=17, height=10, units="cm", dpi=150)
-ggsave("../drafts/changepoint-method/results-sim/fig2.eps", width=17, height=10, units="cm")
-
-
-# Compare theta_i for the first true segment:
-# (using the signal segment w/ most overlap)
-best1seg = filter(allsegs2, scen==1) %>%
-  group_by(alg, segtype, NPOINTS, i) %>%
-  mutate(firstend = pmin(V2, floor(0.5*NPOINTS)),
-         laststart = pmax(V1, floor(0.3*NPOINTS+1))) %>%
-  mutate(overl = pmax(firstend-laststart, 0)) %>%
-  top_n(1, rank(overl, ties.method = "r"))
-extract_theta = function(V1, V2, V3, segtype){
-  if("nuis" %in% segtype & "seg" %in% segtype){
-    ni = segtype=="nuis"
-    si = segtype=="seg"
-    # if segment overlaps a nuisance:
-    if(V1[ni]<=V1[si] & V2[ni]>=V2[si]){
-      thetaN = V3[segtype=="nuis"]
-      thetaS = V3[segtype=="seg"] - thetaN  
-    } else{
-      thetaS = V3[si] 
+# Same but checks start vs start and end vs end
+get_dist_errors2_ordered = function(pos1, pos2, scen, n, tpdf){
+    truepos = tpdf$truepos[tpdf$scen==scen[1] & tpdf$n==n[1]]
+    
+    # for each true segment, calculate distance to chp, in points:
+    d = rep(Inf, length(truepos))
+    for(pairix in seq(1, length(truepos), 2)){
+        chps = truepos[pairix]
+        chpe = truepos[pairix+1]
+        # pick the closest estimated chp for start and end columns
+        d1 = min(abs(pos1-chps))
+        d2 = min(abs(pos2-chpe))
+        d[pairix] = d1
+        d[pairix+1] = d2
     }
-  } else if ("seg" %in% segtype){
-    thetaS = V3[segtype=="seg"]
-  } else {
-    thetaS = NA
-  }
-  return(thetaS)
+    # d<thr <=> there was a TP for this true chp within thr
+    return(d)
 }
-group_by(best1seg, alg, NPOINTS, i) %>%
-  summarize(thetaS = extract_theta(V1, V2, V3, segtype)) %>%
-  mutate(thetaS = ifelse(alg=="anomaly", sqrt(thetaS), thetaS)) %>%  # anomaly reports squared estimate
-  summarize(m=mean(thetaS, na.rm=T), s=sd(thetaS, na.rm=T), n=sum(!is.na(thetaS))) %>%
-  print.data.frame
+# Same but only reports one output per pair of chps (max error)
+get_dist_errors2_paired = function(pos1, pos2, scen, n, tpdf){
+    truepos = tpdf$truepos[tpdf$scen==scen[1] & tpdf$n==n[1]]
+    
+    # for each true segment, calculate distance to chp, in points:
+    d = rep(Inf, length(truepos))
+    for(pairix in seq(1, length(truepos), 2)){
+        chps = truepos[pairix]
+        chpe = truepos[pairix+1]
+        # pick the closest estimated chp for start and end columns
+        errs1 = abs(pos1-chps)
+        errs2 = abs(pos2-chpe)
+        ds = pmax(errs1, errs2) # distance(true seg, est seg) := max(err left, err right)
+        ds = min(ds)  # minimum over est segments
+        d[pairix] = ds
+        d[pairix+1] = ds
+    }
+    # d<thr <=> there was a TP for this true chp within thr
+    return(d)
+}
+# Same as 1st but reports the errors per each detected chp, not per true chp
+get_dist_errors_est = function(pos1, pos2, scen, n, tpdf, segtype){
+    d = rep(Inf, length(pos1)*2)
+    if (segtype[1]=="nuis"){ return(d)}
+    truepos = tpdf$truepos[tpdf$scen==scen[1] & tpdf$n==n[1]]
+    
+    # for each true segment, calculate distance to chp, in points:
+    for(pairix in seq(length(pos1))){
+        chp1 = pos1[pairix]
+        chp2 = pos2[pairix]
+        # pick the closest true chp for each estimated one
+        d1 = min(abs(truepos-chp1))
+        d2 = min(abs(truepos-chp2))
+        d[2*pairix-1] = d1
+        d[2*pairix] = d2
+    }
+    # d<thr <=> there was a TP for this est chp within thr
+    return(d)
+}
 
