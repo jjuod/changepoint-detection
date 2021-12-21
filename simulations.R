@@ -2,6 +2,7 @@ options(stringsAsFactors = F)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+setwd("~/Documents/gitrep/changepoint-detection/")
 source("MAIN-algorithm.R")
 
 #### ------ SIMULATIONS 1 --------
@@ -20,38 +21,44 @@ ntotest = c(30, 60, 90, 130, 180, 240, 320, 440, 550, 750)
 niter = 500
 
 # read output:
-detsalln = read.table("../drafts/changepoint-method/results-sim/sim1-estimates.tsv", h=T)
-allsegs = read.table("../drafts/changepoint-method/results-sim/sim1-detections.tsv", h=T)
+detsalln = read.table("../drafts/changepoint-method/results-sim-new/sim1-estimates.tsv", h=T)
+allsegs = read.table("../drafts/changepoint-method/results-sim-new/sim1-detections.tsv", h=T)
 
 ## PLOT RESULTS
 ## 1. test if the final estimate theta0 converges (FIGURE 1)
 
 head(detsalln)
 temp1 = group_by(detsalln, n, scenario) %>%
-  summarize(estimator="alg1", q2.5 = quantile(theta0, 0.025), q25=quantile(theta0, 0.25),
-            q75=quantile(theta0, 0.75), q97.5=quantile(theta0, 0.975))
+  summarize(estimator="alg1", q2.5 = quantile(theta0, 0.05), q25=quantile(theta0, 0.25),
+            q75=quantile(theta0, 0.75), q97.5=quantile(theta0, 0.95))
 temp2 = group_by(detsalln, n, scenario) %>%
-  summarize(estimator="median", q2.5 = quantile(median, 0.025), q25=quantile(median, 0.25),
-            q75=quantile(median, 0.75), q97.5=quantile(median, 0.975))
-temp3 = detsalln[,c("n", "scenario", "fBG")] %>%
+  summarize(estimator="anomaly", q2.5 = quantile(median, 0.05), q25=quantile(median, 0.25),
+            q75=quantile(median, 0.75), q97.5=quantile(median, 0.95))
+temp3 = group_by(detsalln, n, scenario) %>%
+    summarize(estimator="aPELT", q2.5 = quantile(theta.apelt, 0.05), q25=quantile(theta.apelt, 0.25),
+              q75=quantile(theta.apelt, 0.75), q97.5=quantile(theta.apelt, 0.95))
+temp4 = detsalln[,c("n", "scenario", "fBG")] %>%
   unique() %>%
   mutate(se = ifelse(scenario==3, sqrt(3), 1) / sqrt(fBG*n) ) %>%
-  mutate(estimator="mean", q2.5 = qnorm(0.025, sd=se), q25=qnorm(0.25, sd=se),
-            q75=qnorm(0.75, sd=se), q97.5=qnorm(0.975, sd=se))
+  mutate(estimator="oracle", q2.5 = qnorm(0.05, sd=se), q25=qnorm(0.25, sd=se),
+            q75=qnorm(0.75, sd=se), q97.5=qnorm(0.95, sd=se))
 
-dets_sum = bind_rows(temp1, temp2, temp3)
+dets_sum = bind_rows(temp1, temp2, temp3, temp4)
 
 ungroup(dets_sum) %>%
   filter(n<700) %>%
   mutate(scenario=factor(scenario, labels=c("one segm.", "multiple", "heavy tail"))) %>%
-  ggplot() +
-  geom_linerange(aes(x=n, col=estimator, ymin=q2.5, ymax=q97.5), alpha=0.5, size=2, position=position_dodge(15)) +
-  geom_linerange(aes(x=n, col=estimator, ymin=q25, ymax=q75), alpha=0.9, size=2, position=position_dodge(15)) +
+  ggplot() +  geom_hline(yintercept=0, col="grey40") + 
+  geom_linerange(aes(x=n, col=estimator, ymin=q2.5, ymax=q97.5), alpha=0.5, size=2.5, position=position_dodge(20)) +
+  geom_linerange(aes(x=n, col=estimator, ymin=q25, ymax=q75), alpha=0.9, size=2.5, position=position_dodge(20)) +
   facet_grid(scenario~., scales = "free_y") + 
   scale_x_continuous(breaks=ntotest, minor_breaks = NULL) +
-  ylab("quantile value") + theme_bw(base_size = 15) + theme(panel.grid.major.x = element_blank(), legend.text=element_text(size=13))
+  scale_color_brewer(palette="Set1") +
+  ylab("quantile value") + theme_bw(base_size = 15) +
+  theme(panel.grid.major.x=element_blank(), legend.text=element_text(size=13),
+          legend.position="bottom")
 # ggsave("../drafts/changepoint-method/results-sim/fig1.png", width=23, height=12, units="cm", dpi=150)
-ggsave("../drafts/changepoint-method/v21may/fig1.eps", width=23, height=12, units="cm", device=cairo_ps, fallback_resolution=600)
+ggsave("../drafts/changepoint-method/v21dec/fig1.eps", width=21, height=12, units="cm", device=cairo_ps, fallback_resolution=600)
 
 
 ## 2. test if changepoints are estimated consistently (TABLE 1)
@@ -71,50 +78,71 @@ dist = function(pos1, pos2, scen, n){
   } else if(scen==3){
     truepos = floor(c(0.2*n+1, 0.6*n))
   }
-  maxd = 0
-  # for each true chp:
-  for(chp in truepos){
-    # pick the closest estimated chp
-    d1 = min(abs(pos1-chp))/n
-    d2 = min(abs(pos2-chp))/n
-    d = min(d1, d2)
-    # get the worst-case (i.e. max over all truepos) d
-    maxd = max(maxd, d)
+  # for each true segment, calculate distance to chp, in points:
+  d = rep(Inf, length(truepos))
+  for(pairix in seq(1, length(truepos), 2)){
+      chps = truepos[pairix]
+      chpe = truepos[pairix+1]
+      # pick the closest estimated chp for start and end columns
+      d1 = min(abs(pos1-chps))
+      d2 = min(abs(pos2-chpe))
+      d[pairix] = d1
+      d[pairix+1] = d2
   }
-  # max d<thr <=> there was a TP for each true chp within thr
-  return(maxd)
+  # d<thr <=> there was a TP for this true chp within thr
+  return(d)
 }
-# attach distances to the nearest true chp
-# allsegs_dist = mutate(allsegs, dists=dist(V1, V2, scenario, NPOINTS))
-# TODO
 
-# summary of each iteration (dist for TPR and nsegs)
-segsperiter = summarize(allsegs, nsegs=max(nsegs),
-                       maxd=dist(V1, V2, scenario, NPOINTS))
+allsegs = filter(allsegs, !is.na(V1))  # Drop anom/aPELT iters w/o detections
+
+# get distances to the nearest true chp
+segsperiter = group_by(allsegs, run, scenario, NPOINTS, i) %>%
+    summarize(nsegs=max(nsegs), disterr=dist(V1, V2, scenario, NPOINTS)) %>%
+    mutate(disterr=disterr/NPOINTS)
+
 # fill in missing rows when an iteration returns 0 segs
-temp = expand.grid(NPOINTS=ntotest, run=1:2, scenario=1:3, i=1:500)
+temp = expand.grid(NPOINTS=ntotest, run=1:4, scenario=1:3, i=1:niter)
 temp$nsegs = 0
-temp$maxd = 1
+temp$disterr = Inf
 segsperiter = anti_join(temp, segsperiter, by=c("NPOINTS", "run", "scenario", "i")) %>% 
   bind_rows(segsperiter, .)
 
-# overall summary for each method
-distrnsegs = group_by(segsperiter, NPOINTS, scenario, run) %>%
-  mutate(ntrue = ifelse(scenario==2, 3, 1)) %>%
-  summarize(meannseg = mean(nsegs), ncorr=sum(nsegs==ntrue)/max(i),
-            tpr = mean(maxd<0.05), meand = mean(maxd), ntrue=max(ntrue)) %>%
+# calculate fraction of simulations reporting a chp within 0.05 of true seg ("TPR")
+tpr_table = group_by(segsperiter, NPOINTS, scenario, run, i) %>%
+  summarize(tpr = max(disterr)<0.05) %>%
+  summarize(tpr = sum(tpr)/niter) %>%  # per penalty level
   ungroup
 
+# Plot:
+tpr_table %>%
+    ggplot(aes(x=NPOINTS)) + geom_line(aes(y=tpr, lty=factor(run))) +
+    facet_wrap(~scenario) + theme_bw()
+
 # mean number of segs reported for each n x scenario x run
+distrnsegs = group_by(allsegs, run, scenario, NPOINTS, i) %>%
+    summarize(nsegs=max(nsegs)) %>%
+    mutate(ntrue = ifelse(scenario==2, 3, 1)) %>%
+    summarize(meannseg=mean(nsegs), ntrue=max(ntrue),
+              ncorr=sum(nsegs==ntrue)/niter)  # add up iterations
+
 distrnsegs %>%
   ggplot(aes(x=NPOINTS)) + geom_line(aes(y=meannseg, lty=factor(run))) +
   geom_hline(aes(yintercept=ntrue), col="green") +
   facet_wrap(~scenario) + theme_bw()
-
-# fraction of simulations reporting a chp within 0.05 of true seg ("TPR")
 distrnsegs %>%
-  ggplot(aes(x=NPOINTS)) + geom_line(aes(y=tpr, lty=factor(run))) +
-  facet_wrap(~scenario) + theme_bw()
+    filter(run!=1) %>%  # drop no-repeat
+    mutate(alg=factor(run, labels=c("algorithm 1", "anomaly", "aPELT"))) %>%
+    ggplot(aes(x=NPOINTS)) +
+    geom_hline(aes(yintercept=0), col="grey30") +
+    geom_line(aes(y=meannseg-ntrue, col=alg, lty=alg), lwd=1) +
+    scale_linetype_manual(name="detections:", values=c(1,3,2)) +
+    scale_color_manual(name="detections:", values=RColorBrewer::brewer.pal(3, "Set1")) +
+    facet_wrap(~scenario, labeller=labeller(scenario=c("1"="one segment", "2"="multiple", "3"="heavy tail")),
+               scales="free_y") +
+    theme_bw() + xlab("n") + ylab(expression(E(~hat(k)-k))) +
+    theme(legend.position = "bottom", text=element_text(size=14),
+          legend.text=element_text(size=13), plot.margin = unit(c(0.1,0.3,0,0.1), "cm"))
+ggsave("../drafts/changepoint-method/v21dec/fig1b.eps", width=17, height=8, units="cm")
 
 # see raw segments for one case
 filter(allsegs, scenario==2, run==2, i<=100) %>%
@@ -129,15 +157,19 @@ filter(allsegs, scenario==2, run==2, i<=100) %>%
 # remember that run2 is the correct (full) run!
 t1 = distrnsegs[,c("scenario", "NPOINTS", "run", "meannseg")] %>%
   spread(key="run", value="meannseg")
-t2 = distrnsegs[,c("scenario", "NPOINTS", "run", "tpr")] %>%
+t2 = tpr_table[,c("scenario", "NPOINTS", "run", "tpr")] %>%
   spread(key="run", value="tpr")
-colnames(t1)[3:4] = c("meann.run1", "meann.run2")
-colnames(t2)[3:4] = c("tpr.run1", "tpr.run2")
+colnames(t1)[3:6] = c("meann.norepeat", "meann.full", "meann.anom", "meann.apelt")
+colnames(t2)[3:6] = c("tpr.norepeat", "tpr.full", "tpr.anom", "tpr.apelt")
 full_join(t1, t2, by=c("scenario", "NPOINTS")) %>%
   filter(NPOINTS %in% c(30, 90, 180, 440, 750)) %>%
+  select(-ends_with(c("norepeat"))) %>%
   print.data.frame
-
-
+# Suppl. Table:
+full_join(t1, t2, by=c("scenario", "NPOINTS")) %>%
+  filter(NPOINTS %in% c(30, 90, 180, 440, 750)) %>%
+  select(-ends_with(c("anom", "apelt")))
+  
 # Table S2:
 # Cost (mean and SD) estimated in each setting, for the full Alg 1, or the online version,
 # or using theoretical segment positions.

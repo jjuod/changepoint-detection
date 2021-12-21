@@ -223,36 +223,36 @@ cycle_l2 = function(NPOINTS, iters, scen, lfactor=0.33){
 }
 
 
-# # at each n:
-# for(npoints in ntotest2){
-#   allsegs2 = rbind(allsegs2, cycle_l2(npoints, 1:niter2, 4))
-#   allsegs2 = rbind(allsegs2, cycle_l2(npoints, 1:niter2, 1))
-#   allsegs2 = rbind(allsegs2, cycle_l2(npoints, 1:niter2, 2))
-#   allsegs2 = rbind(allsegs2, cycle_l2(npoints, 1:niter2, 3))
-# }
-# 
-# nrow(allsegs2)
-# # (Recommend running this in a separate R session, RStudio doesn't manage to do garbage collection fast enough)
-# 
-# # allsegs had an empty row due to initialization
-# # also drop NAs which occur when an algorithm did not detect anything
-# head(allsegs2)
-# allsegs2 = allsegs2[which(allsegs2[,1]!=0),]
-# allsegs2bkp = allsegs2
-# allsegs2 = data.frame(allsegs2)
-# rownames(allsegs2) = NULL
-# colnames(allsegs2)[4] = "segtype"
-# colnames(allsegs2)[7] = "alg"
-# colnames(allsegs2)[8] = "scen"
-# allsegs2$segtype = ifelse(allsegs2$segtype==1, "seg", "nuis")
-# methodnames = c("1"="full", "2"="pruned", "3"="anomaly", "4"="NOT", "5"="aPELT", "6"="sparse")
-# allsegs2$alg = methodnames[as.character(allsegs2$alg)]
-# 
-# 
-# # save output:
-# write.table(allsegs2, "../drafts/changepoint-method/results-sim-new/sim2-detections.tsv", quote=F, sep="\t", col.names=T, row.names=F)
-# save("allsegs2bkp", file="../drafts/changepoint-method/results-sim-new/sim2-raw.RData")
-# # allsegs2 = read.table("../drafts/changepoint-method/results-sim/sim2-detections.tsv", h=T)
+# at each n:
+for(npoints in ntotest2){
+  allsegs2 = rbind(allsegs2, cycle_l2(npoints, 1:niter2, 4))
+  allsegs2 = rbind(allsegs2, cycle_l2(npoints, 1:niter2, 1))
+  allsegs2 = rbind(allsegs2, cycle_l2(npoints, 1:niter2, 2))
+  allsegs2 = rbind(allsegs2, cycle_l2(npoints, 1:niter2, 3))
+}
+
+nrow(allsegs2)
+# (Recommend running this in a separate R session, RStudio doesn't manage to do garbage collection fast enough)
+
+# allsegs had an empty row due to initialization
+# also drop NAs which occur when an algorithm did not detect anything
+head(allsegs2)
+allsegs2 = allsegs2[which(allsegs2[,1]!=0),]
+allsegs2bkp = allsegs2
+allsegs2 = data.frame(allsegs2)
+rownames(allsegs2) = NULL
+colnames(allsegs2)[4] = "segtype"
+colnames(allsegs2)[7] = "alg"
+colnames(allsegs2)[8] = "scen"
+allsegs2$segtype = ifelse(allsegs2$segtype==1, "seg", "nuis")
+methodnames = c("1"="full", "2"="pruned", "3"="anomaly", "4"="NOT", "5"="aPELT", "6"="sparse")
+allsegs2$alg = methodnames[as.character(allsegs2$alg)]
+
+
+# save output:
+write.table(allsegs2, "../drafts/changepoint-method/results-sim-new/sim2-detections.tsv", quote=F, sep="\t", col.names=T, row.names=F)
+save("allsegs2bkp", file="../drafts/changepoint-method/results-sim-new/sim2-raw.RData")
+# allsegs2 = read.table("../drafts/changepoint-method/results-sim/sim2-detections.tsv", h=T)
 
 
 # ----------- LENGTH ROBUSTNESS TESTS --------------

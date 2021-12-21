@@ -124,7 +124,7 @@ disterrors_bytrue = allsegs2 %>%
     summarize(disterr=get_dist_errors2_ordered(V1, V2, scen, NPOINTS, trueposdf)) %>%
     mutate(disterr=disterr/NPOINTS) %>%
     summarize(tps = max(disterr)<0.05) %>%
-    summarize(tps = sum(tps)/niter2)  # per penalty level
+    summarize(tps = sum(tps)/niter2)  # per setting
 st3 = disterrors_bytrue %>%
     spread(key="alg", value="tps") %>%
     arrange(scen)
@@ -237,47 +237,45 @@ thetadf %>%
 filter(thetadf, NPOINTS==220)
 
 
-# TODO finish
 
-# SCENARIO 4 sensitivity analysis results
-# *** (Supplement Table) ***
+# ---------------------------------
+## Sensitivity analysis: different l values
+
+# different l values, but only scenario 1 and n=60
 niter2 = 500
-disterrors_byest = allsegs2_scen4 %>%
-    group_by(alg, segtype, scen, NPOINTS, i) %>%
-    summarize(disterr=get_dist_errors_est(V1, V2, scen, NPOINTS, trueposdf, segtype),
-              nsegs=n())
-# convert distance errors to fractions of full data
-disterrors_byest = mutate(disterrors_byest, disterr=disterr/NPOINTS)
-# actually summarize per iteration:
-worst_errs_byest = group_by(disterrors_byest, NPOINTS, alg, segtype, i) %>%
-    summarize(hits = sum(disterr<0.05), nsegs = max(nsegs))
+ntotest2 = 60
+allsegs2_len = read.table("../drafts/changepoint-method/results-sim-new/sim2-forlen.tsv", h=T)
+allsegs2_len = filter(allsegs2, scen==1, NPOINTS==60, i<=500) %>%
+    filter(alg!="full", alg!="NOT") %>%  # only showing pruned results here,
+                                         # and NOT can't change length
+    mutate(lenfactor=0.33) %>%
+    bind_rows(allsegs2_len) %>%
+    select(-one_of(c("scen", "NPOINTS")))
 
-mae_table = filter(disterrors_byest, disterr<0.05, segtype=="seg") %>%
-    group_by(NPOINTS, alg) %>%
-    summarize(mae=mean(disterr*NPOINTS)) %>%
-    spread(key="alg", value="mae")
-mae_table[,c("NPOINTS", "pruned", "anomaly", "aPELT", "sparse", "NOT")]
-
-ppv_table = worst_errs_byest %>%
-    group_by(NPOINTS, alg, segtype) %>%
-    summarize(totalhits=sum(hits), totaln=sum(nsegs)*2)
-# attach the expected number of true segments and calculate bias, tpr
-distrnsegs = ppv_table %>%
-    filter(alg!="full", segtype=="seg" | alg=="pruned") %>%
-    mutate(ntrue = 1) %>%
-    mutate(meannseg=totaln/2/niter2, bias=meannseg-ntrue) %>%
-    ungroup
-distrnsegs %>%
-    select(one_of(c("NPOINTS", "alg", "segtype", "meannseg"))) %>%
-    spread(key="alg", value="meannseg")
-
-disterrors_bytrue = allsegs2_scen4 %>%
+# TPRs by true changepoints
+# *** (Supplement Table) ***
+disterrors_bytrue = allsegs2_len %>%
     filter(segtype=="seg") %>%
-    group_by(alg, NPOINTS, i) %>%
-    summarize(disterr=get_dist_errors2_ordered(V1, V2, 1, NPOINTS, trueposdf)) %>%
-    mutate(disterr=disterr/NPOINTS) %>%
+    group_by(alg, lenfactor, i) %>%
+    summarize(disterr=get_dist_errors2_ordered(V1, V2, 1, 60, trueposdf)) %>%
+    mutate(disterr=disterr/60) %>%
     summarize(tps = max(disterr)<0.05) %>%
-    summarize(tps = sum(tps)/niter2)  # per penalty level
-disterrors_bytrue %>%
-    spread(key="alg", value="tps")
+    summarize(tps = sum(tps)/niter2)  # per length factor level
+st3 = disterrors_bytrue %>%
+    spread(key="lenfactor", value="tps")
+st3
+
+# Number of segments
+# localization errors for each detected segment:
+nsegs_table = allsegs2_len %>%
+    group_by(alg, segtype, lenfactor) %>%
+    summarize(nsegs=n()/niter2)   # actual number of segments
+nsegs_table %>%
+    mutate(algseg=paste(alg, segtype, sep=".")) %>%
+    ungroup %>%
+    select(-one_of(c("alg", "segtype"))) %>%
+    spread(key="algseg", value="nsegs")
+nsegs_table %>%
+    spread(key="lenfactor", value="nsegs") %>%
+    bind_rows(st3)
 
