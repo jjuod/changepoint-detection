@@ -165,10 +165,11 @@ full_join(t1, t2, by=c("scenario", "NPOINTS")) %>%
   filter(NPOINTS %in% c(30, 90, 180, 440, 750)) %>%
   select(-ends_with(c("norepeat"))) %>%
   print.data.frame
-# Suppl. Table:
+# Suppl. Table S1:
 full_join(t1, t2, by=c("scenario", "NPOINTS")) %>%
   filter(NPOINTS %in% c(30, 90, 180, 440, 750)) %>%
-  select(-ends_with(c("anom", "apelt")))
+  select(-ends_with(c("anom", "apelt"))) %>%
+  print.data.frame
   
 # Table S2:
 # Cost (mean and SD) estimated in each setting, for the full Alg 1, or the online version,
@@ -182,7 +183,8 @@ tableS2 %>%
 
 
 #### ------ SIMULATIONS 2 --------
-# main processing oved to simulations2-parsing.R
+# main processing moved to simulations2-parsing.R - run that now
+# to recreate the paper's figures and tables.
 # this is just leftover testing scripts
 
 # see raw segments for one case
