@@ -69,9 +69,15 @@ plot(bedDS$pos/1e3, bedDS$m)
 ts = bedDS$m
 finaltheta = median(ts)
 pen = autoset_penalty(ts)
+robust_sd = mad(diff(bedDS$m))
+ts_norm = (ts-finaltheta)/robust_sd
+tsdf = data.frame(chrom=chr, chromStart=as.integer(bedDS$pos),
+                  chromEnd=as.integer(bedDS$pos+DSfactor),
+                  count=as.integer(round(bedDS$m)))
 
 ## Apply standard epidemic chp detection (anomaly)
-res.anom = capa.uv((ts-finaltheta)/sd(ts), beta=pen, beta_tilde=pen, type="mean", min_seg_len=2, max_seg_len=maxpeaklen, transform=identity)
+res.anom = capa.uv(ts_norm, beta=10*pen, beta_tilde=10*pen, type="mean",
+                   min_seg_len=2, max_seg_len=maxpeaklen, transform=identity)
 # Extract segments, and convert effect sizes to raw means (similar to Alg2)
 res.anom.c = collective_anomalies(res.anom)[,1:3]
 res.anom.c$mean.change = apply(res.anom.c, 1, function(x) mean(ts[x[1]:x[2]]))
@@ -93,8 +99,8 @@ print(anomres)
 save(res.anom, file=paste0(outprefix, "anom.RData"))
 
 ## Apply NOT (Narrowest-over-threshold detector)
-res.not = not(ts, method="not", contrast="pcwsConstMean")
-res.not = features(res.not)$cpt
+res.not = not(ts_norm, method="not", contrast="pcwsConstMean")
+res.not = features(res.not, method="threshold", th=0.4*pen)$cpt
 res.not = cbind(c(1, res.not),
                 c(res.not-1, length(ts)))
 res.not = cbind(res.not, apply(res.not, 1, function(x){
@@ -105,17 +111,15 @@ notincr = res.not[res.not[,3]>finaltheta,, drop=F]
 notres = data.frame(chrom=chr,
                     chromStart=notincr[,1]*DSfactor + actualstart,
                     chromEnd=notincr[,2]*DSfactor + actualstart+DSfactor, 
-                    segtype=ifelse(notincr[,3]>finaltheta+sd(ts), "S", "S2"),
+                    segtype=ifelse(notincr[,3]>finaltheta+robust_sd, "S", "S2"),
                     row.names = NULL)
 print(notres)
 # save output
 save(res.not, file=paste0(outprefix, "not.RData"))
 
 ## Apply PeakSegFPOP
-tsdf = data.frame(chrom=chr, chromStart=as.integer(bedDS$pos), chromEnd=as.integer(bedDS$pos+DSfactor),
-                  count=as.integer(round(bedDS$m)))
 # use the penalty chosen in Broad data
-res.fpop = PeakSegFPOP_df(tsdf, 1e4, "/tmp/")$segments
+res.fpop = PeakSegFPOP_df(tsdf, 10e3, "/tmp/")$segments
 fpopincr = filter(data.frame(res.fpop), status=="peak", mean>finaltheta) %>%
   mutate(segtype = "S")
 print(fpopincr)
@@ -124,12 +128,12 @@ save(res.fpop, file=paste0(outprefix, "fpop.RData"))
 
 
 ## Apply Algorithm 2:
-alg2 = fulldetector_prune(ts, theta0=finaltheta, MAXLOOKBACK=maxpeaklen, PEN=pen, PEN2=pen, SD=sd(ts), prune=2)
+alg2 = fulldetector_prune(ts, theta0=finaltheta, MAXLOOKBACK=maxpeaklen,
+                          PEN=10*pen, PEN2=10*pen, SD=robust_sd, prune=2)
 print(alg2$segs)
 
 # we are interested only in segments of increased mean:
 alg2incr = alg2$segs[alg2$segs[,3]>finaltheta,, drop=F]
-
 alg2res = data.frame(chrom=chr,
                      chromStart=alg2incr[,1]*DSfactor + actualstart,
                      chromEnd=alg2incr[,2]*DSfactor + actualstart+DSfactor, 
@@ -152,7 +156,6 @@ p2 = ggplot()+
             data=labels, color="black") +
   # geom_point(aes(x=pos/1000, y=m), alpha=0.5, data=bedDS) +
   geom_point(aes(x=pos/1000, y=m), shape=21, col="black", fill="grey50", stroke=0.5, data=bedDS) +
-  geom_text(aes(x=x, y=y, label=label), data=toplotL, hjust=0) +
   geom_segment(aes(chromStart/1000, -4, xend=chromEnd/1000, yend=-4, color=segtype, size=segtype),
                data=anomres)
 if(nrow(notres)>0){
@@ -171,11 +174,13 @@ if(nrow(alg2res)>0){
                  data=alg2res)
 }
 p2 = p2 +  
+  geom_text(aes(x=x, y=y, label=label), data=toplotL, hjust=0) +
   # scale_linetype_manual(values=c("false negative"="dotted", correct="solid"))+
   scale_size_manual(values=c("false positive"=2, correct=0.7, "N"=7, "S"=6, "S2"=6))+
   scale_fill_manual(values=ann.colors, breaks=names(ann.colors), name="annotations")+
   # scale_color_manual(values=c("S"="blue", "N"="gold"), name="detections", labels=c("nuisance", "signal")) +
-  scale_color_manual(values=c("S"="blue", "N"="gold", "S2"="#D8EFFF"), name="detections", labels=c("nuisance", "signal", "sign. low")) +
+  scale_color_manual(values=c("S"="blue", "N"="gold", "S2"="#D8EFFF"), name="detections",
+                     labels=c("nuisance", "signal", "sign. low")) +
   theme_bw()+ theme(legend.key = element_rect(), text=element_text(size=12))+
   guides(fill=guide_legend(order=1),
          # linetype=guide_legend(order=3, override.aes=list(fill="white")),
@@ -191,8 +196,6 @@ ggsave(paste0(outprefix, "alg2.eps"), width=18, height=10, units="cm", device=ca
 
 
 ## Calculate fit statistics (BIC/SIC)
-SD = sd(ts)
-
 # BIC
 # Calculates likelihood assuming a normal model with current finaltheta and SD.
 # For nuisance segments, uses only the points N\S.
@@ -246,23 +249,23 @@ getBIC = function(df, ts, mu0, sigma0){
   return(logl+bglogl+klogn)
 }
 
-bic.anom = getBIC(res.anom.c, ts, finaltheta, SD)
+bic.anom = getBIC(res.anom.c, ts, finaltheta, robust_sd)
 
 # define "background" segments
 res.not.segs = data.frame(res.not[res.not[,3]-finaltheta>0, ])
 colnames(res.not.segs) = c("start", "end", "mean")
-bic.not = getBIC(res.not.segs, ts, finaltheta, SD)
+bic.not = getBIC(res.not.segs, ts, finaltheta, robust_sd)
 
 # extract background and convert back to ts coordinates
 res.fpop.segs = filter(res.fpop, status=="peak") %>% arrange(chromStart)
 res.fpop.segs$start = match(res.fpop.segs$chromStart, bedDS$pos)
 res.fpop.segs$end = match(res.fpop.segs$chromEnd, bedDS$pos)
-bic.fpop = getBIC(res.fpop.segs, ts, finaltheta, SD)
+bic.fpop = getBIC(res.fpop.segs, ts, finaltheta, robust_sd)
 
 res.alg2.segs = data.frame(alg2$segs)
 colnames(res.alg2.segs) = c("start", "end", "mean", "segtype")
 res.alg2.segs$segtype = ifelse(res.alg2.segs$segtype==1, "S", "N")
-bic.alg2 = getBIC(res.alg2.segs, ts, finaltheta, SD)
+bic.alg2 = getBIC(res.alg2.segs, ts, finaltheta, robust_sd)
 
 bic.anom
 bic.not
